@@ -1,0 +1,7 @@
+{
+  "short_name": "App",
+  "name": "BloodMS",
+  "icons": [],
+  "start_url": ".",
+  "display": "standalone"
+}

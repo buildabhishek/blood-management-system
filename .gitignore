@@ -1,0 +1,132 @@
+#######################################
+# 🔐 Environment & Secrets
+#######################################
+# Root env files
+.env
+.env.*
+*.local
+
+# React env files
+frontend/.env*
+blood-bank-ui/.env*
+
+# Spring Boot secrets
+backend/src/main/resources/application.properties
+backend/src/main/resources/application-*.properties
+
+# Firebase / credentials
+backend/firebase-service-account.json
+
+#######################################
+# ☕ Java / Spring Boot (Maven)
+#######################################
+# Build output
+target/
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+# Compiled files
+*.class
+
+# Packaged artifacts
+*.jar
+*.war
+*.ear
+
+# Maven Wrapper (keep jar tracked if you want reproducibility)
+# Remove below line if you WANT to track wrapper jar
+.mvn/wrapper/maven-wrapper.jar
+
+#######################################
+# ⚛️ React / Node
+#######################################
+# Dependencies
+node_modules/
+frontend/node_modules/
+blood-bank-ui/node_modules/
+
+# Build output
+build/
+dist/
+frontend/build/
+frontend/dist/
+blood-bank-ui/build/
+blood-bank-ui/dist/
+
+# Cache
+.cache/
+.eslintcache
+frontend/.cache/
+blood-bank-ui/.cache/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+#######################################
+# 🧪 Testing / Coverage
+#######################################
+coverage/
+*.lcov
+
+#######################################
+# 🧾 Logs
+#######################################
+logs/
+*.log
+
+#######################################
+# 🛠 IDE / Editors
+#######################################
+# IntelliJ
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# VS Code
+.vscode/
+
+# Eclipse / STS
+.apt_generated/
+.classpath
+.factorypath
+.project
+.settings/
+.springBeans
+.sts4-cache/
+
+# NetBeans
+/nbproject/private/
+/nbbuild/
+/nbdist/
+/.nb-gradle/
+
+#######################################
+# 💻 OS Files
+#######################################
+.DS_Store
+Thumbs.db
+
+#######################################
+# 🧹 Misc
+#######################################
+*.tmp
+*.bak
+*.swp
+*.orig
+*.pid
+
+#######################################
+# 📦 Archives
+#######################################
+*.zip
+*.tar.gz
+
+#######################################
+# 🐳 Docker (Optional)
+#######################################
+Dockerfile*
+.dockerignore
