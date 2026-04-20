@@ -39,19 +39,35 @@ public class BloodRequest {
 
     private String notes;
 
+    /** Base64-encoded receipt image / PDF uploaded by hospital */
+    @Column(columnDefinition = "TEXT")
+    private String receiptData;
+
+    /** Original file name for display (e.g. "prescription.pdf") */
+    private String receiptFileName;
+
+    /** MIME type so frontend can render correctly */
+    private String receiptMimeType;
+
+    /** Reason when blood bank rejects or hospital cancels */
+    private String rejectionReason;
+
+    /** OTP for rider delivery confirmation (4-digit, hashed) */
+    private String deliveryOtp;
+
     @ManyToOne
-    @JsonIgnoreProperties({"password", "phone", "role", "entityName", "address", "fcmToken",
-                            "active", "createdAt", "updatedAt", "latitude", "longitude"})
+    @JsonIgnoreProperties({ "password", "phone", "role", "entityName", "address", "fcmToken",
+            "active", "createdAt", "updatedAt", "latitude", "longitude" })
     private User hospital;
 
     @ManyToOne
-    @JsonIgnoreProperties({"password", "phone", "role", "entityName", "address", "fcmToken",
-                            "active", "createdAt", "updatedAt", "latitude", "longitude"})
+    @JsonIgnoreProperties({ "password", "phone", "role", "entityName", "address", "fcmToken",
+            "active", "createdAt", "updatedAt", "latitude", "longitude" })
     private User bloodBank;
 
     @ManyToOne
-    @JsonIgnoreProperties({"password", "phone", "role", "entityName", "address", "fcmToken",
-                            "active", "createdAt", "updatedAt", "latitude", "longitude"})
+    @JsonIgnoreProperties({ "password", "phone", "role", "entityName", "address", "fcmToken",
+            "active", "createdAt", "updatedAt", "latitude", "longitude" })
     private User rider;
 
     @CreationTimestamp
@@ -60,20 +76,41 @@ public class BloodRequest {
 
     @PrePersist
     protected void onCreate() {
-        if (this.status == null) this.status = RequestStatus.PENDING;
+        if (this.status == null)
+            this.status = RequestStatus.PENDING;
     }
 
-    // ── Convenience getters for frontend ─────────────────────────────────────
+    // ── Convenience getters ───────────────────────────────────────────────────
     public String getHospitalName() {
-        if (hospital == null) return null;
+        if (hospital == null)
+            return null;
         return hospital.getEntityName() != null ? hospital.getEntityName() : hospital.getName();
     }
 
     public String getBloodBankName() {
-        if (bloodBank == null) return null;
+        if (bloodBank == null)
+            return null;
         return bloodBank.getEntityName() != null ? bloodBank.getEntityName() : bloodBank.getName();
     }
 
-    public String getRiderName() { return rider != null ? rider.getName() : null; }
-    public Long getRiderId() { return rider != null ? rider.getId() : null; }
+    public String getRiderName() {
+        return rider != null ? rider.getName() : null;
+    }
+
+    public Long getRiderId() {
+        return rider != null ? rider.getId() : null;
+    }
+
+    public String getRiderPhone() {
+        return rider != null ? rider.getPhone() : null;
+    }
+
+    public boolean hasReceipt() {
+        return receiptData != null && !receiptData.isBlank();
+    }
+
+    @Version
+    private Long version;
+
+    private LocalDateTime otpExpiry;
 }

@@ -10,6 +10,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDate;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 
 @Service
 public class BloodInventoryService {
@@ -44,11 +45,37 @@ public class BloodInventoryService {
     public List<BloodInventory> getAvailableBlood(BloodGroup bloodGroup, int quantity,
                                                     Double reqLat, Double reqLng) {
         LocalDate today = LocalDate.now();
-        List<BloodInventory> results = inventoryRepo
-                .findByBloodGroupAndQuantityGreaterThanEqual(bloodGroup, quantity)
+
+        // Aggregate by blood bank — sum all non-expired rows per bank,
+        // then filter banks whose total meets the requested quantity.
+        // This prevents the same bank appearing multiple times in search results.
+        Map<Long, BloodInventory> bankMap = new java.util.LinkedHashMap<>();
+        List<BloodInventory> rows = inventoryRepo
+                .findByBloodGroupAndQuantityGreaterThanEqual(bloodGroup, 1)
                 .stream()
                 .filter(inv -> inv.getExpiryDate() == null || !inv.getExpiryDate().isBefore(today))
                 .toList();
+
+        for (BloodInventory inv : rows) {
+            Long bankId = inv.getBloodBankId();
+            if (bankId == null) continue;
+            if (bankMap.containsKey(bankId)) {
+                BloodInventory existing = bankMap.get(bankId);
+                existing.setQuantity(existing.getQuantity() + inv.getQuantity());
+            } else {
+                // Clone-like: create a representative row with aggregated quantity
+                BloodInventory agg = new BloodInventory();
+                agg.setBloodGroup(inv.getBloodGroup());
+                agg.setQuantity(inv.getQuantity());
+                agg.setCategory(inv.getCategory());
+                agg.setBloodBank(inv.getBloodBank());
+                bankMap.put(bankId, agg);
+            }
+        }
+
+        List<BloodInventory> results = bankMap.values().stream()
+                .filter(inv -> inv.getQuantity() >= quantity)
+                .collect(java.util.stream.Collectors.toList());
 
         // Sort by distance if requester coordinates are available
         if (reqLat != null && reqLng != null) {

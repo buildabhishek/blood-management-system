@@ -4,12 +4,13 @@ import com.bms.dto.*;
 import com.bms.entity.BloodRequest;
 import com.bms.service.BloodRequestService;
 import jakarta.validation.Valid;
-import org.springframework.data.domain.Page;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/requests")
@@ -20,6 +21,8 @@ public class BloodRequestController {
     public BloodRequestController(BloodRequestService service) {
         this.service = service;
     }
+
+    // ── HOSPITAL ──────────────────────────────────────────────────────────────
 
     @PreAuthorize("hasRole('HOSPITAL')")
     @PostMapping
@@ -39,6 +42,19 @@ public class BloodRequestController {
         return service.getHospitalHistory(auth.getName());
     }
 
+    @PreAuthorize("hasRole('HOSPITAL')")
+    @PutMapping("/{id}/cancel")
+    public ResponseEntity<?> cancelRequest(@PathVariable Long id, Authentication auth) {
+        try {
+            BloodRequest req = service.cancelRequest(id, auth.getName());
+            return ResponseEntity.ok(req);
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    // ── BLOOD BANK ────────────────────────────────────────────────────────────
+
     @PreAuthorize("hasRole('BLOOD_BANK')")
     @GetMapping("/blood-bank")
     public List<BloodRequest> getBloodBankRequests(Authentication auth) {
@@ -47,17 +63,28 @@ public class BloodRequestController {
 
     @PreAuthorize("hasRole('BLOOD_BANK')")
     @PutMapping("/{id}/status")
-    public BloodRequest updateStatus(@PathVariable Long id,
+    public ResponseEntity<?> updateStatus(@PathVariable Long id,
             @Valid @RequestBody StatusDto dto, Authentication auth) {
-        return service.updateStatus(id, dto.getStatus(), auth.getName());
+        try {
+            BloodRequest req = service.updateStatus(id, dto.getStatus(), auth.getName(), dto.getReason());
+            return ResponseEntity.ok(req);
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
     }
 
     @PreAuthorize("hasRole('BLOOD_BANK')")
     @PutMapping("/{id}/assign-rider")
-    public BloodRequest assignRider(@PathVariable Long id,
+    public ResponseEntity<?> assignRider(@PathVariable Long id,
             @Valid @RequestBody RiderAssignDto dto) {
-        return service.assignRider(id, dto.getRiderId());
+        try {
+            return ResponseEntity.ok(service.assignRider(id, dto.getRiderId()));
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
     }
+
+    // ── RIDER ─────────────────────────────────────────────────────────────────
 
     @PreAuthorize("hasRole('RIDER')")
     @GetMapping("/rider/tasks")
@@ -66,17 +93,20 @@ public class BloodRequestController {
     }
 
     @PreAuthorize("hasRole('RIDER')")
-    @PutMapping("/{id}/rider-status")
-    public BloodRequest updateRiderStatus(@PathVariable Long id,
-            @Valid @RequestBody StatusDto dto, Authentication auth) {
-        return service.updateRiderStatus(id, dto.getStatus(), auth.getName());
+    @GetMapping("/rider/history")
+    public List<BloodRequest> getRiderHistory(Authentication auth) {
+        return service.getRiderHistory(auth.getName());
     }
 
-    @PreAuthorize("hasRole('ADMIN')")
-    @GetMapping
-    public Page<BloodRequest> getAllRequests(
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size) {
-        return service.getAllRequests(page, size);
+    @PreAuthorize("hasRole('RIDER')")
+    @PutMapping("/{id}/rider-status")
+    public ResponseEntity<?> updateRiderStatus(@PathVariable Long id,
+            @Valid @RequestBody StatusDto dto, Authentication auth) {
+        try {
+            BloodRequest req = service.updateRiderStatus(id, dto.getStatus(), auth.getName(), dto.getOtp());
+            return ResponseEntity.ok(req);
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
     }
 }

@@ -3,7 +3,6 @@ package com.bms.controller;
 import com.bms.dto.SearchResponseDTO;
 import com.bms.entity.*;
 import com.bms.service.BloodInventoryService;
-import com.bms.service.BloodInventoryService;
 import jakarta.validation.Valid;
 import org.springframework.data.domain.Page;
 import org.springframework.http.ResponseEntity;
@@ -47,6 +46,7 @@ public class BloodInventoryController {
     /**
      * Hospital searches available blood — sorted by distance when lat/lng provided.
      */
+    @PreAuthorize("hasAnyRole('HOSPITAL','BLOOD_BANK','ADMIN')")
     @GetMapping("/search")
     public ResponseEntity<?> search(
             @RequestParam String bloodGroup,

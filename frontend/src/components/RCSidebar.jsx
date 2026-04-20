@@ -1,3 +1,4 @@
+import NotificationBell from './NotificationBell';
 import RCLogo from './RCLogo';
 import { RC } from './RCTheme';
 
@@ -10,63 +11,73 @@ export default function RCSidebar({ role, entityName, tabs, activeTab, onTabChan
   }[role] || { icon: '👤', label: role };
 
   return (
-    <aside className="flex flex-col" style={{
-      width: '220px', minHeight: '100vh',
-      backgroundColor: RC.crimson,
-      borderRight: `3px solid ${RC.greenDark}`,
+    <aside style={{
+      width: '220px', minHeight: '100vh', display: 'flex', flexDirection: 'column',
+      backgroundColor: RC.crimson, borderRight: `3px solid ${RC.greenDark}`,
     }}>
-      {/* Logo + Foundation name */}
-      <div className="flex flex-col items-center py-5 px-3"
-        style={{ borderBottom: `2px solid rgba(255,255,255,0.2)` }}>
-        <RCLogo size={64} className="mb-2 drop-shadow-md" />
-        <p className="text-white font-bold text-sm text-center leading-tight">R C FOUNDATION</p>
-        <p className="text-xs text-center mt-0.5" style={{ color: RC.greenMid }}>
+      {/* Logo + bell row */}
+      <div style={{
+        display: 'flex', flexDirection: 'column', alignItems: 'center',
+        padding: '16px 12px 12px', borderBottom: '2px solid rgba(255,255,255,0.2)',
+      }}>
+        <RCLogo size={56} style={{ marginBottom: '8px' }} />
+        <p style={{ color: '#fff', fontWeight: 900, fontSize: '13px', textAlign: 'center', margin: 0 }}>
+          R C FOUNDATION
+        </p>
+        <p style={{ color: RC.greenMid, fontSize: '11px', textAlign: 'center', margin: '2px 0 10px' }}>
           Always Ready to Help You
         </p>
+        <NotificationBell />
       </div>
 
       {/* Role + entity */}
-      <div className="px-3 py-3" style={{ borderBottom: `1px solid rgba(255,255,255,0.15)` }}>
-        <div className="flex items-center gap-2 mb-1">
-          <span className="text-base">{roleLabel.icon}</span>
-          <span className="text-xs font-semibold text-white opacity-80">{roleLabel.label}</span>
+      <div style={{ padding: '10px 12px', borderBottom: '1px solid rgba(255,255,255,0.15)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '2px' }}>
+          <span style={{ fontSize: '15px' }}>{roleLabel.icon}</span>
+          <span style={{ fontSize: '11px', fontWeight: 600, color: 'rgba(255,255,255,0.8)' }}>
+            {roleLabel.label}
+          </span>
         </div>
         {entityName && (
-          <p className="text-xs font-bold truncate" style={{ color: RC.green }}>{entityName}</p>
+          <p style={{ fontSize: '12px', fontWeight: 700, color: RC.green, margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {entityName}
+          </p>
         )}
       </div>
 
-      {/* Nav tabs */}
-      <nav className="flex-1 px-2 py-3 space-y-1">
+      {/* Nav */}
+      <nav style={{ flex: 1, padding: '10px 8px' }}>
         {tabs.map(tab => (
           <button key={tab.key} onClick={() => onTabChange(tab.key)}
-            className="w-full text-left flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium transition-all"
-            style={activeTab === tab.key ? {
-              backgroundColor: '#FFFFFF',
-              color: RC.crimson,
-              fontWeight: '700',
-            } : {
-              color: 'rgba(255,255,255,0.85)',
-              backgroundColor: 'transparent',
+            style={{
+              width: '100%', textAlign: 'left', display: 'flex', alignItems: 'center',
+              gap: '8px', padding: '10px 12px', borderRadius: '10px', marginBottom: '2px',
+              border: 'none', cursor: 'pointer', fontSize: '13px', fontWeight: 500,
+              transition: 'all 0.15s',
+              ...(activeTab === tab.key
+                ? { backgroundColor: '#fff', color: RC.crimson, fontWeight: 700 }
+                : { backgroundColor: 'transparent', color: 'rgba(255,255,255,0.85)' }),
             }}
             onMouseEnter={e => { if (activeTab !== tab.key) e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.15)'; }}
             onMouseLeave={e => { if (activeTab !== tab.key) e.currentTarget.style.backgroundColor = 'transparent'; }}>
-            <span className="text-base">{tab.icon}</span>
+            <span style={{ fontSize: '15px' }}>{tab.icon}</span>
             <span>{tab.label}</span>
           </button>
         ))}
       </nav>
 
       {/* Footer */}
-      <div className="px-3 py-3" style={{ borderTop: `1px solid rgba(255,255,255,0.15)` }}>
-        <p className="text-xs text-center mb-2" style={{ color: 'rgba(255,255,255,0.5)' }}>
+      <div style={{ padding: '10px 12px', borderTop: '1px solid rgba(255,255,255,0.15)' }}>
+        <p style={{ fontSize: '11px', textAlign: 'center', color: 'rgba(255,255,255,0.45)', margin: '0 0 8px' }}>
           Reg. No. E-13086
         </p>
-        <button onClick={onLogout}
-          className="w-full py-2 rounded-lg text-sm font-semibold transition-all"
-          style={{ backgroundColor: RC.greenDark, color: '#fff' }}
-          onMouseEnter={e => e.currentTarget.style.backgroundColor = RC.green}
-          onMouseLeave={e => e.currentTarget.style.backgroundColor = RC.greenDark}>
+        <button onClick={onLogout} style={{
+          width: '100%', padding: '8px', borderRadius: '10px', border: 'none',
+          backgroundColor: RC.greenDark, color: '#fff', fontWeight: 700,
+          fontSize: '13px', cursor: 'pointer', transition: 'background 0.2s',
+        }}
+        onMouseEnter={e => e.currentTarget.style.backgroundColor = RC.green}
+        onMouseLeave={e => e.currentTarget.style.backgroundColor = RC.greenDark}>
           Logout
         </button>
       </div>

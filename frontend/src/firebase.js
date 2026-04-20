@@ -1,8 +1,6 @@
 import { initializeApp } from "firebase/app";
-import { getMessaging, getToken } from "firebase/messaging";
+import { getMessaging, getToken, onMessage } from "firebase/messaging";
 
-// Replace these values with your actual Firebase project config.
-// Get them from: Firebase Console → Project Settings → General → Your Apps
 const firebaseConfig = {
     apiKey: process.env.REACT_APP_FIREBASE_API_KEY || "",
     authDomain: process.env.REACT_APP_FIREBASE_AUTH_DOMAIN || "",
@@ -13,33 +11,34 @@ const firebaseConfig = {
 
 let messaging = null;
 
-// Only initialize Firebase if a real API key is configured
-const isConfigured = firebaseConfig.apiKey && firebaseConfig.apiKey.length > 0;
+const isConfigured = firebaseConfig.apiKey;
 
 if (isConfigured) {
-    try {
-        const app = initializeApp(firebaseConfig);
-        messaging = getMessaging(app);
-    } catch (e) {
-        console.warn("Firebase init failed — push notifications disabled:", e.message);
-    }
-} else {
-    console.info("Firebase not configured — push notifications disabled. Set REACT_APP_FIREBASE_* env vars to enable.");
+    const app = initializeApp(firebaseConfig);
+    messaging = getMessaging(app);
 }
-
-export { messaging };
 
 export const requestToken = async () => {
     if (!messaging) return null;
-    try {
-        const permission = await Notification.requestPermission();
-        if (permission !== "granted") return null;
-        const token = await getToken(messaging, {
-            vapidKey: process.env.REACT_APP_FIREBASE_VAPID_KEY || "",
+
+    const permission = await Notification.requestPermission();
+    if (permission !== "granted") return null;
+
+    const token = await getToken(messaging, {
+        vapidKey: process.env.REACT_APP_FIREBASE_VAPID_KEY,
+    });
+
+    return token;
+};
+
+export const listenToMessages = () => {
+    if (!messaging) return;
+
+    onMessage(messaging, (payload) => {
+        console.log("Message received:", payload);
+
+        new Notification(payload.notification.title, {
+            body: payload.notification.body,
         });
-        return token;
-    } catch (e) {
-        console.warn("FCM token request failed:", e.message);
-        return null;
-    }
+    });
 };

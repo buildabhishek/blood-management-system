@@ -1,15 +1,16 @@
 package com.bms.service;
 
+import com.bms.entity.NotificationLog;
 import com.bms.entity.User;
+import com.bms.repository.NotificationLogRepository;
 import com.google.firebase.messaging.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 /**
- * Firebase Cloud Messaging notification service.
- * Sends push notifications to mobile/web clients via FCM.
- * Gracefully no-ops if Firebase is not configured.
+ * Sends push notifications via FCM AND persists them to the DB
+ * so the notification bell in each dashboard can show history.
  */
 @Service
 public class NotificationService {
@@ -17,61 +18,103 @@ public class NotificationService {
     private static final Logger log = LoggerFactory.getLogger(NotificationService.class);
 
     private final boolean firebaseEnabled;
+    private final NotificationLogRepository logRepo;
 
-    public NotificationService() {
-        // Check if Firebase has been initialized
+    public NotificationService(NotificationLogRepository logRepo) {
+        this.logRepo = logRepo;
         boolean enabled = false;
         try {
             com.google.firebase.FirebaseApp.getInstance();
             enabled = true;
         } catch (Exception e) {
-            log.warn("Firebase not configured — push notifications disabled. Set FIREBASE_CREDENTIALS_PATH to enable.");
+            log.warn("Firebase not configured — push notifications disabled.");
         }
         this.firebaseEnabled = enabled;
     }
 
-    public void sendToUser(User user, String title, String body) {
-        if (!firebaseEnabled || user.getFcmToken() == null || user.getFcmToken().isBlank()) return;
-        send(user.getFcmToken(), title, body);
-    }
+    // ── Public API ────────────────────────────────────────────────────────────
 
     public void notifyBloodBankRequestReceived(User bloodBank, String bloodGroup, String hospitalName) {
-        sendToUser(bloodBank,
+        deliver(bloodBank,
             "🩸 New Blood Request",
-            hospitalName + " needs " + bloodGroup + ". Tap to accept or reject.");
+            hospitalName + " needs " + bloodGroup + ". Tap to accept or reject.",
+            "REQUEST", null);
     }
 
     public void notifyHospitalRequestAccepted(User hospital, String bloodGroup, String bankName) {
-        sendToUser(hospital,
+        deliver(hospital,
             "✅ Request Accepted",
-            bankName + " accepted your " + bloodGroup + " request. Rider will be assigned shortly.");
+            bankName + " accepted your " + bloodGroup + " request. Rider will be assigned shortly.",
+            "REQUEST", null);
     }
 
-    public void notifyHospitalRequestRejected(User hospital, String bloodGroup, String bankName) {
-        sendToUser(hospital,
-            "❌ Request Rejected",
-            bankName + " could not fulfil your " + bloodGroup + " request. Please try another bank.");
+    public void notifyHospitalRequestRejected(User hospital, String bloodGroup, String bankName, String reason) {
+        String msg = bankName + " could not fulfil your " + bloodGroup + " request.";
+        if (reason != null && !reason.isBlank()) msg += " Reason: " + reason;
+        msg += " Please try another blood bank.";
+        deliver(hospital, "❌ Request Rejected", msg, "REQUEST", null);
     }
 
-    public void notifyHospitalRiderAssigned(User hospital, String riderName, String bloodGroup) {
-        sendToUser(hospital,
+    public void notifyHospitalRequestCancelled(User bloodBank, String bloodGroup, String hospitalName) {
+        deliver(bloodBank,
+            "🚫 Request Cancelled",
+            hospitalName + " cancelled their " + bloodGroup + " request.",
+            "REQUEST", null);
+    }
+
+    public void notifyHospitalRiderAssigned(User hospital, String riderName, String bloodGroup, Long requestId) {
+        deliver(hospital,
             "🏍 Rider Assigned",
-            riderName + " is picking up " + bloodGroup + " for you.");
+            riderName + " is on their way to pick up " + bloodGroup + " for you.",
+            "REQUEST", requestId);
     }
 
-    public void notifyHospitalDelivered(User hospital, String bloodGroup) {
-        sendToUser(hospital,
+    public void notifyHospitalDelivered(User hospital, String bloodGroup, Long requestId) {
+        deliver(hospital,
             "📦 Blood Delivered",
-            bloodGroup + " has been delivered. Please confirm receipt.");
+            bloodGroup + " has been successfully delivered. Please confirm receipt.",
+            "REQUEST", requestId);
     }
 
-    public void notifyRiderNewTask(User rider, String bloodGroup, String hospitalName) {
-        sendToUser(rider,
+    public void notifyRiderNewTask(User rider, String bloodGroup, String hospitalName, Long requestId) {
+        deliver(rider,
             "🚚 New Delivery Task",
-            "Pick up " + bloodGroup + " for " + hospitalName);
+            "Pick up " + bloodGroup + " and deliver to " + hospitalName + ".",
+            "REQUEST", requestId);
     }
 
-    private void send(String fcmToken, String title, String body) {
+    public void notifyRiderTaskCancelled(User rider, String bloodGroup) {
+        deliver(rider,
+            "🚫 Task Cancelled",
+            "The " + bloodGroup + " delivery task has been cancelled.",
+            "REQUEST", null);
+    }
+
+    // ── Internal ──────────────────────────────────────────────────────────────
+
+    private void deliver(User user, String title, String body, String refType, Long refId) {
+        if (user == null) return;
+
+        // 1. Persist to DB (always — even if FCM fails)
+        NotificationLog entry = new NotificationLog();
+        entry.setRecipient(user);
+        entry.setTitle(title);
+        entry.setMessage(body);
+        entry.setRefType(refType);
+        entry.setRefId(refId);
+        try {
+            logRepo.save(entry);
+        } catch (Exception e) {
+            log.warn("Failed to persist notification log: {}", e.getMessage());
+        }
+
+        // 2. Push via FCM (best-effort)
+        if (firebaseEnabled && user.getFcmToken() != null && !user.getFcmToken().isBlank()) {
+            sendFcm(user.getFcmToken(), title, body);
+        }
+    }
+
+    private void sendFcm(String fcmToken, String title, String body) {
         try {
             Message message = Message.builder()
                 .setToken(fcmToken)
@@ -83,7 +126,7 @@ public class NotificationService {
             String response = FirebaseMessaging.getInstance().send(message);
             log.debug("FCM sent: {}", response);
         } catch (FirebaseMessagingException e) {
-            log.warn("FCM send failed for token {}: {}", fcmToken.substring(0, 8) + "...", e.getMessage());
+            log.warn("FCM send failed: {}", e.getMessage());
         }
     }
 }

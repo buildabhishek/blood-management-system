@@ -44,6 +44,7 @@ target/
 node_modules/
 frontend/node_modules/
 blood-bank-ui/node_modules/
+frontend/node
 
 # Build output
 build/

@@ -7,6 +7,7 @@ import lombok.Setter;
 
 @Getter @Setter
 public class RequestDto {
+
     @NotBlank(message = "Patient name is required")
     private String patientName;
 
@@ -16,10 +17,18 @@ public class RequestDto {
     @Min(1) @Max(50)
     private int quantity;
 
-    @NotBlank
+    @NotBlank(message = "Urgency is required")
     private String urgency;
 
+    /** Must be provided — hospital must select a blood bank from search results */
+    @NotNull(message = "Please search for blood availability and select a blood bank before submitting a request")
     private Long bloodBankId;
+
     private String notes;
-    private String hospitalName; // display only, identity comes from JWT
+    private String hospitalName; // display only
+
+    /** Base64-encoded receipt (prescription / hospital letter) */
+    private String receiptData;
+    private String receiptFileName;
+    private String receiptMimeType;
 }

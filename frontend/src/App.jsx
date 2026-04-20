@@ -4,31 +4,46 @@ import AdminDashboard from './dashboards/AdminDashboard';
 import BloodBankDashboard from './dashboards/BloodBankDashboard';
 import HospitalDashboard from './dashboards/HospitalDashboard';
 import RiderDashboard from './dashboards/RiderDashboard';
+import { listenToMessages, requestToken } from './firebase';
 import Landing from './pages/Landing';
 import Login from './pages/Login';
+
+const API_BASE = process.env.REACT_APP_API_URL || '/api';
 
 export default function App() {
     const [auth, setAuth] = useState(null);
     const [loading, setLoading] = useState(true);
 
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     useEffect(() => {
         const token = localStorage.getItem('token');
         const role = localStorage.getItem('role');
+
         if (token && role) setAuth({ token, role });
+
+        // 🔔 Firebase setup — only when user is logged in
+        if (token) {
+            requestToken().then((fcmToken) => {
+                if (fcmToken) {
+                    fetch(`${API_BASE}/auth/fcm-token`, {
+                        method: 'PUT',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            Authorization: `Bearer ${token}`,
+                        },
+                        body: JSON.stringify({ fcmToken }),
+                    }).catch(() => {});
+                }
+            }).catch(() => {});
+        }
+
+        listenToMessages();
+
         setLoading(false);
     }, []);
 
-    useEffect(() => {
-        if (!auth) return;
-        const handler = (e) => {
-            e.preventDefault();
-            e.returnValue = '';
-        };
-        window.addEventListener('beforeunload', handler);
-        return () => window.removeEventListener('beforeunload', handler);
-    }, [auth]);
-
-    const API_BASE = process.env.REACT_APP_API_URL || '/api';
+    // No beforeunload nag — auth state is persisted in localStorage,
+    // so the user can safely close/refresh and resume their session.
 
     const handleLogout = async () => {
         if (!window.confirm('Log out?')) return;

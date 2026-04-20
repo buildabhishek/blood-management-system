@@ -11,26 +11,29 @@ const processQueue = (error, token = null) => {
 };
 
 export const apiFetch = async (path, options = {}, retry = true) => {
-    const res = await fetch(`${BASE}${path}`, {
-        ...options,
-        headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${getToken()}`,
-            ...(options.headers || {}),
-        },
-    });
+    const token = getToken();
 
-    // Auto-refresh on 401
-    if (res.status === 401 && retry) {
+    // Only attach Authorization header when a real token exists
+    const headers = { "Content-Type": "application/json", ...(options.headers || {}) };
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+
+    const res = await fetch(`${BASE}${path}`, { ...options, headers });
+
+    // ── 401 handling ──────────────────────────────────────────────────────────
+    // IMPORTANT: Never treat 401 from auth endpoints as session expiry.
+    // /api/auth/login returns 401 for wrong credentials — that is a normal error,
+    // not an expired session, so we must NOT redirect to /login from here.
+    const isAuthEndpoint = path.startsWith("/auth/");
+    if (res.status === 401 && retry && !isAuthEndpoint) {
         const refreshToken = localStorage.getItem("refreshToken");
         if (!refreshToken) { handleAuthExpired(); return; }
 
         if (isRefreshing) {
             return new Promise((resolve, reject) => {
                 failQueue.push({ resolve, reject });
-            }).then(token => {
-                options.headers = { ...options.headers, Authorization: `Bearer ${token}` };
-                return apiFetch(path, options, false);
+            }).then(newToken => {
+                const retryHeaders = { ...headers, Authorization: `Bearer ${newToken}` };
+                return apiFetch(path, { ...options, headers: retryHeaders }, false);
             });
         }
 
@@ -46,26 +49,44 @@ export const apiFetch = async (path, options = {}, retry = true) => {
             localStorage.setItem("token", data.token);
             localStorage.setItem("refreshToken", data.refreshToken);
             processQueue(null, data.token);
-            options.headers = { ...options.headers, Authorization: `Bearer ${data.token}` };
-            return apiFetch(path, options, false);
+            const retryHeaders = { ...headers, Authorization: `Bearer ${data.token}` };
+            return apiFetch(path, { ...options, headers: retryHeaders }, false);
         } catch {
             processQueue(new Error("Session expired"));
             handleAuthExpired();
+            return;
         } finally {
             isRefreshing = false;
         }
-        return;
     }
 
+    // ── Error response handling ───────────────────────────────────────────────
     if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || err.message || `Request failed (${res.status})`);
+        let err = {};
+        try { err = await res.json(); } catch { /* non-JSON error body */ }
+
+        // Backend validation errors look like:
+        // { "error": "Validation failed", "fields": { "name": "...", "phone": "..." } }
+        // Flatten field errors into a readable message
+        if (err.fields && typeof err.fields === "object") {
+            const fieldMessages = Object.entries(err.fields)
+                .map(([field, msg]) => `${capitalise(field)}: ${msg}`)
+                .join("\n");
+            throw new Error(fieldMessages || err.error || "Validation failed");
+        }
+
+        throw new Error(
+            err.error || err.message || `Request failed (${res.status})`
+        );
     }
 
-    // Handle 204 No Content
     if (res.status === 204) return null;
     return res.json();
 };
+
+function capitalise(s) {
+    return s.charAt(0).toUpperCase() + s.slice(1);
+}
 
 function handleAuthExpired() {
     localStorage.clear();

@@ -6,6 +6,13 @@ import lombok.Setter;
 
 @Getter @Setter
 public class StatusDto {
-    @NotBlank private String status;
-    private String deliveryOtp; // for delivery confirmation
+
+    @NotBlank(message = "Status is required")
+    private String status;
+
+    /** Optional reason for rejection (shown to hospital) */
+    private String reason;
+
+    /** Delivery OTP — required when rider marks a request as DELIVERED */
+    private String otp;
 }

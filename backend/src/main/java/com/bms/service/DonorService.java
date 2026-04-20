@@ -29,7 +29,7 @@ public class DonorService {
     }
 
     public List<Donor> getMyDonors(String bloodBankPhone) {
-        return donorRepository.findByBloodBankPhone(bloodBankPhone);
+        return donorRepository.findByBloodBankPhoneAndActiveTrue(bloodBankPhone);
     }
 
     public List<Donor> getAll() {

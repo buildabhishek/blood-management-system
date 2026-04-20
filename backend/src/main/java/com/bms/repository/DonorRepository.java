@@ -7,5 +7,8 @@ import java.util.List;
 
 public interface DonorRepository extends JpaRepository<Donor, Long> {
 
+    List<Donor> findByBloodBankPhoneAndActiveTrue(String phone);
+
+    // Keep for admin usage (shows all)
     List<Donor> findByBloodBankPhone(String phone);
 }
