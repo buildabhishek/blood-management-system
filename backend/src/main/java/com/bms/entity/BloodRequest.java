@@ -1,6 +1,7 @@
 package com.bms.entity;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.persistence.*;
 import jakarta.validation.constraints.*;
 import lombok.Getter;
@@ -52,7 +53,8 @@ public class BloodRequest {
     /** Reason when blood bank rejects or hospital cancels */
     private String rejectionReason;
 
-    /** OTP for rider delivery confirmation (4-digit, hashed) */
+    /** OTP for rider delivery confirmation (4-digit) — only shown to the requesting hospital */
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private String deliveryOtp;
 
     @ManyToOne

@@ -9,10 +9,12 @@ const BLOOD_GROUPS = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
 const CATEGORIES = ['Whole Blood', 'PCV', 'FFP', 'SDP', 'Platelets'];
 
 const TABS = [
-    { key: 'requests', icon: '🩸', label: 'Requests' },
-    { key: 'inventory', icon: '📦', label: 'Inventory' },
-    { key: 'donors', icon: '👤', label: 'Donors' },
-    { key: 'camps', icon: '🏕️', label: 'Camps' },
+    { key: 'requests',  icon: '🩸',  label: 'Requests'  },
+    { key: 'inventory', icon: '📦',  label: 'Inventory' },
+    { key: 'donors',    icon: '👤',  label: 'Donors'    },
+    { key: 'camps',     icon: '🏕️', label: 'Camps'     },
+    { key: 'history',   icon: '📋',  label: 'History'   },
+    { key: 'reports',   icon: '📊',  label: 'Reports'   },
 ];
 
 function PageHeader({ title }) {
@@ -261,9 +263,9 @@ function AssignRiderModal({ request, riders, onConfirm, onClose }) {
                                     marginBottom: '6px',
                                     borderRadius: '10px',
                                     cursor: 'pointer',
-                                    border: `2px solid ${selectedRider == r.id ? RC.greenDark : RC.greenMid}`,
+                                    border: `2px solid ${selectedRider === r.id ? RC.greenDark : RC.greenMid}`,
                                     backgroundColor:
-                                        selectedRider == r.id ? RC.greenLight : '#FAFAFA',
+                                        selectedRider === r.id ? RC.greenLight : '#FAFAFA',
                                     transition: 'all 0.15s',
                                 }}
                             >
@@ -271,7 +273,7 @@ function AssignRiderModal({ request, riders, onConfirm, onClose }) {
                                     type="radio"
                                     name="rider"
                                     value={r.id}
-                                    checked={selectedRider == r.id}
+                                    checked={selectedRider === r.id}
                                     onChange={() => setSelected(r.id)}
                                     style={{ accentColor: RC.greenDark }}
                                 />
@@ -337,9 +339,9 @@ function AssignRiderModal({ request, riders, onConfirm, onClose }) {
                                     marginBottom: '6px',
                                     borderRadius: '10px',
                                     cursor: 'pointer',
-                                    border: `2px solid ${selectedRider == r.id ? '#E65100' : '#FFD54F'}`,
+                                    border: `2px solid ${selectedRider === r.id ? '#E65100' : '#FFD54F'}`,
                                     backgroundColor:
-                                        selectedRider == r.id ? RC.cardYellow : '#FFFBF0',
+                                        selectedRider === r.id ? RC.cardYellow : '#FFFBF0',
                                     transition: 'all 0.15s',
                                 }}
                             >
@@ -347,7 +349,7 @@ function AssignRiderModal({ request, riders, onConfirm, onClose }) {
                                     type="radio"
                                     name="rider"
                                     value={r.id}
-                                    checked={selectedRider == r.id}
+                                    checked={selectedRider === r.id}
                                     onChange={() => setSelected(r.id)}
                                     style={{ accentColor: '#E65100' }}
                                 />
@@ -639,8 +641,6 @@ function RequestsTab({ onToast }) {
         'ACCEPTED',
         'ASSIGNED',
         'IN_TRANSIT',
-        'DELIVERED',
-        'REJECTED',
     ];
 
     return (
@@ -2274,6 +2274,262 @@ function CampsTab({ onToast }) {
 }
 
 /* ── Main ─────────────────────────────────────────────────────── */
+/* ── History Tab ──────────────────────────────────────────────── */
+function HistoryTab({ onToast }) {
+    const [history, setHistory] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [filter, setFilter] = useState('ALL');
+
+    useEffect(() => {
+        apiFetch('/requests/blood-bank/history')
+            .then((d) => setHistory(d || []))
+            .catch((e) => onToast('Failed to load history: ' + e.message, 'error'))
+            .finally(() => setLoading(false));
+    }, [onToast]);
+
+    const filtered = filter === 'ALL' ? history : history.filter((r) => r.status === filter);
+
+    const stats = [
+        { label: 'Total Fulfilled', value: history.filter((r) => r.status === 'DELIVERED').length, bg: RC.greenLight, color: RC.greenDark, border: RC.greenMid },
+        { label: 'Rejected',        value: history.filter((r) => r.status === 'REJECTED').length,  bg: RC.pinkBg,    color: RC.crimson,   border: RC.crimsonLight },
+        { label: 'Cancelled',       value: history.filter((r) => r.status === 'CANCELLED').length, bg: RC.cardYellow, color: '#E65100',   border: '#FFD54F' },
+        { label: 'Total Handled',   value: history.length,                                          bg: RC.cardBlue,  color: '#1565C0',   border: '#90CAF9' },
+    ];
+
+    return (
+        <div>
+            {/* Stats */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '12px', marginBottom: '20px' }}>
+                {stats.map((s) => (
+                    <div key={s.label} style={{ borderRadius: '12px', padding: '14px', textAlign: 'center',
+                        backgroundColor: s.bg, border: `1.5px solid ${s.border}` }}>
+                        <div style={{ fontSize: '26px', fontWeight: 900, color: s.color }}>{s.value}</div>
+                        <div style={{ fontSize: '11px', fontWeight: 600, color: RC.textMid, marginTop: '3px' }}>{s.label}</div>
+                    </div>
+                ))}
+            </div>
+
+            {/* Filter */}
+            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '16px' }}>
+                {['ALL', 'DELIVERED', 'REJECTED', 'CANCELLED'].map((f) => (
+                    <button key={f} onClick={() => setFilter(f)}
+                        style={{ padding: '5px 14px', borderRadius: '20px', fontSize: '12px', fontWeight: 700,
+                            border: '1.5px solid', cursor: 'pointer',
+                            backgroundColor: filter === f ? RC.crimson : '#fff',
+                            color: filter === f ? '#fff' : RC.crimson,
+                            borderColor: filter === f ? RC.crimsonDark : RC.crimsonLight }}>
+                        {f}
+                    </button>
+                ))}
+            </div>
+
+            {loading ? (
+                <div style={{ textAlign: 'center', padding: '40px', color: RC.textMuted }}>Loading history...</div>
+            ) : filtered.length === 0 ? (
+                <RCCard variant="green" style={{ padding: '30px', textAlign: 'center' }}>
+                    <p style={{ color: RC.greenDark, fontWeight: 600, margin: 0 }}>No records found.</p>
+                </RCCard>
+            ) : (
+                <RCCard variant="white" style={{ overflow: 'hidden' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                        <thead>
+                            <tr style={{ backgroundColor: RC.pinkBg, borderBottom: `2px solid ${RC.crimsonLight}` }}>
+                                {['#', 'Patient', 'Blood', 'Qty', 'Hospital', 'Rider', 'Urgency', 'Status'].map((h) => (
+                                    <th key={h} style={{ textAlign: 'left', padding: '10px 14px',
+                                        fontSize: '11px', fontWeight: 900, color: RC.crimson }}>{h}</th>
+                                ))}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {filtered.map((r, i) => (
+                                <tr key={r.id} style={{ backgroundColor: i % 2 === 0 ? '#fff' : RC.pinkSoft,
+                                    borderBottom: '1px solid #F5E0E8' }}>
+                                    <td style={{ padding: '10px 14px', color: RC.textMuted, fontSize: '11px' }}>#{r.id}</td>
+                                    <td style={{ padding: '10px 14px', fontWeight: 600, color: RC.textDark }}>{r.patientName}</td>
+                                    <td style={{ padding: '10px 14px', fontWeight: 900, color: RC.crimson }}>{r.bloodGroup}</td>
+                                    <td style={{ padding: '10px 14px', color: RC.textMid }}>{r.quantity}</td>
+                                    <td style={{ padding: '10px 14px', color: RC.textMid, maxWidth: '110px',
+                                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                        {r.hospitalName || '—'}
+                                    </td>
+                                    <td style={{ padding: '10px 14px', color: RC.textMid }}>{r.riderName || '—'}</td>
+                                    <td style={{ padding: '10px 14px' }}>
+                                        {r.urgency === 'URGENT'
+                                            ? <span style={{ fontSize: '11px', fontWeight: 700, padding: '2px 8px',
+                                                borderRadius: '20px', backgroundColor: RC.pinkBg, color: RC.crimson }}>🚨 Urgent</span>
+                                            : <span style={{ fontSize: '11px', color: RC.textMuted }}>Normal</span>}
+                                    </td>
+                                    <td style={{ padding: '10px 14px' }}>
+                                        <span style={{ fontSize: '11px', fontWeight: 700, padding: '3px 9px',
+                                            borderRadius: '20px',
+                                            backgroundColor: r.status === 'DELIVERED' ? RC.greenLight : r.status === 'REJECTED' ? RC.pinkBg : RC.cardYellow,
+                                            color: r.status === 'DELIVERED' ? RC.greenDark : r.status === 'REJECTED' ? RC.crimson : '#E65100' }}>
+                                            {r.status}
+                                        </span>
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </RCCard>
+            )}
+        </div>
+    );
+}
+
+/* ── Reports Tab ──────────────────────────────────────────────── */
+function ReportsTab({ onToast }) {
+    const [inventory, setInventory] = useState([]);
+    const [history, setHistory]     = useState([]);
+    const [loading, setLoading]     = useState(true);
+
+    useEffect(() => {
+        Promise.all([
+            apiFetch('/inventory/my').catch(() => []),
+            apiFetch('/requests/blood-bank/history').catch(() => []),
+        ])
+            .then(([inv, hist]) => { setInventory(inv || []); setHistory(hist || []); })
+            .catch((e) => onToast('Failed to load reports: ' + e.message, 'error'))
+            .finally(() => setLoading(false));
+    }, [onToast]);
+
+    if (loading) return <div style={{ textAlign: 'center', padding: '60px', color: RC.textMuted }}>Loading reports...</div>;
+
+    // Blood group breakdown from inventory
+    const bgTotals = {};
+    inventory.forEach((inv) => {
+        bgTotals[inv.bloodGroup] = (bgTotals[inv.bloodGroup] || 0) + inv.quantity;
+    });
+
+    // Category breakdown
+    const catTotals = {};
+    inventory.forEach((inv) => {
+        catTotals[inv.category] = (catTotals[inv.category] || 0) + inv.quantity;
+    });
+
+    // Expiry alerts
+    const today = new Date();
+    const expiringSoon = inventory.filter((inv) => {
+        if (!inv.expiryDate) return false;
+        const exp = new Date(inv.expiryDate);
+        const daysLeft = (exp - today) / (1000 * 60 * 60 * 24);
+        return daysLeft >= 0 && daysLeft <= 7;
+    });
+    const expired = inventory.filter((inv) => inv.expiryDate && new Date(inv.expiryDate) < today);
+
+    const totalUnits = inventory.reduce((s, inv) => s + inv.quantity, 0);
+    const delivered  = history.filter((r) => r.status === 'DELIVERED').length;
+    const rejected   = history.filter((r) => r.status === 'REJECTED').length;
+    const fulfilRate = history.length > 0 ? ((delivered / history.length) * 100).toFixed(1) : 0;
+
+    const BG_COLORS = { 'A+':'#E53935','A-':'#C62828','B+':'#1E88E5','B-':'#1565C0',
+                        'AB+':'#7B1FA2','AB-':'#4A148C','O+':'#2E7D32','O-':'#1B5E20' };
+    const maxBG = Math.max(...Object.values(bgTotals), 1);
+
+    return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            {/* KPI row */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '12px' }}>
+                {[
+                    { label: 'Total Units in Stock', value: totalUnits,    bg: RC.cardBlue,   color: '#1565C0', border: '#90CAF9' },
+                    { label: 'Requests Fulfilled',   value: delivered,     bg: RC.greenLight, color: RC.greenDark, border: RC.greenMid },
+                    { label: 'Fulfilment Rate',      value: `${fulfilRate}%`, bg: RC.cardYellow, color: '#E65100', border: '#FFD54F' },
+                    { label: 'Expiring in 7 Days',   value: expiringSoon.length, bg: RC.pinkBg, color: RC.crimson, border: RC.crimsonLight },
+                ].map((k) => (
+                    <div key={k.label} style={{ borderRadius: '12px', padding: '16px', textAlign: 'center',
+                        backgroundColor: k.bg, border: `2px solid ${k.border}` }}>
+                        <div style={{ fontSize: '28px', fontWeight: 900, color: k.color }}>{k.value}</div>
+                        <div style={{ fontSize: '11px', fontWeight: 600, color: RC.textMid, marginTop: '3px' }}>{k.label}</div>
+                    </div>
+                ))}
+            </div>
+
+            {/* Expiry alerts */}
+            {(expired.length > 0 || expiringSoon.length > 0) && (
+                <RCCard variant="pink" style={{ padding: '16px', border: `2px solid ${RC.crimson}` }}>
+                    <p style={{ margin: '0 0 10px', fontWeight: 900, color: RC.crimson, fontSize: '13px' }}>
+                        ⚠️ Inventory Alerts
+                    </p>
+                    {expired.length > 0 && (
+                        <p style={{ margin: '0 0 6px', fontSize: '12px', color: RC.crimson, fontWeight: 700 }}>
+                            🗑 {expired.length} batch(es) have <strong>expired</strong> — remove from stock immediately.
+                        </p>
+                    )}
+                    {expiringSoon.length > 0 && (
+                        <p style={{ margin: 0, fontSize: '12px', color: '#E65100', fontWeight: 600 }}>
+                            ⏰ {expiringSoon.length} batch(es) expiring within 7 days — prioritise dispatch.
+                        </p>
+                    )}
+                </RCCard>
+            )}
+
+            {/* Blood group stock chart */}
+            <RCCard variant="white" style={{ padding: '18px' }}>
+                <p style={{ margin: '0 0 14px', fontWeight: 900, fontSize: '13px', color: RC.textMid }}>
+                    CURRENT STOCK BY BLOOD GROUP
+                </p>
+                {Object.keys(bgTotals).length === 0 ? (
+                    <p style={{ color: RC.textMuted, fontSize: '13px' }}>No inventory data available.</p>
+                ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                        {Object.entries(bgTotals).sort((a, b) => b[1] - a[1]).map(([bg, qty]) => (
+                            <div key={bg} style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                <span style={{ fontWeight: 900, fontSize: '13px', color: BG_COLORS[bg] || RC.crimson,
+                                    minWidth: '36px', textAlign: 'right' }}>{bg}</span>
+                                <div style={{ flex: 1, height: '22px', backgroundColor: '#F5F5F5', borderRadius: '11px', overflow: 'hidden' }}>
+                                    <div style={{ width: `${(qty / maxBG) * 100}%`, height: '100%',
+                                        backgroundColor: BG_COLORS[bg] || RC.crimson, borderRadius: '11px',
+                                        transition: 'width 0.5s', minWidth: '4px' }} />
+                                </div>
+                                <span style={{ fontWeight: 700, fontSize: '13px', color: RC.textDark, minWidth: '40px' }}>
+                                    {qty} u
+                                </span>
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </RCCard>
+
+            {/* Category breakdown */}
+            <RCCard variant="white" style={{ padding: '18px' }}>
+                <p style={{ margin: '0 0 14px', fontWeight: 900, fontSize: '13px', color: RC.textMid }}>
+                    STOCK BY CATEGORY (Whole Blood · PCV · FFP · SDP · Platelets)
+                </p>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
+                    {Object.entries(catTotals).map(([cat, qty]) => (
+                        <div key={cat} style={{ padding: '10px 16px', borderRadius: '10px',
+                            backgroundColor: RC.cardBlue, border: '1.5px solid #90CAF9', textAlign: 'center' }}>
+                            <div style={{ fontSize: '20px', fontWeight: 900, color: '#1565C0' }}>{qty}</div>
+                            <div style={{ fontSize: '11px', fontWeight: 600, color: RC.textMid }}>{cat}</div>
+                        </div>
+                    ))}
+                </div>
+            </RCCard>
+
+            {/* Supply summary */}
+            <RCCard variant="white" style={{ padding: '18px' }}>
+                <p style={{ margin: '0 0 14px', fontWeight: 900, fontSize: '13px', color: RC.textMid }}>
+                    REQUEST FULFILMENT SUMMARY
+                </p>
+                <div style={{ display: 'flex', gap: '14px', flexWrap: 'wrap' }}>
+                    {[
+                        { label: 'Total Requests Handled', value: history.length, color: RC.textDark },
+                        { label: 'Delivered',  value: delivered, color: RC.greenDark },
+                        { label: 'Rejected',   value: rejected,  color: RC.crimson },
+                        { label: 'Cancelled',  value: history.filter((r) => r.status === 'CANCELLED').length, color: '#888' },
+                    ].map((s) => (
+                        <div key={s.label} style={{ padding: '12px 16px', borderRadius: '10px',
+                            backgroundColor: RC.pinkSoft, border: `1px solid ${RC.crimsonLight}`, minWidth: '130px' }}>
+                            <div style={{ fontSize: '22px', fontWeight: 900, color: s.color }}>{s.value}</div>
+                            <div style={{ fontSize: '11px', color: RC.textMuted, marginTop: '2px' }}>{s.label}</div>
+                        </div>
+                    ))}
+                </div>
+            </RCCard>
+        </div>
+    );
+}
+
 export default function BloodBankDashboard({ onLogout }) {
     const [tab, setTab] = useState('requests');
     const [toast, setToast] = useState(null);
@@ -2296,10 +2552,12 @@ export default function BloodBankDashboard({ onLogout }) {
                     title={`${TABS.find((t) => t.key === tab)?.icon} ${TABS.find((t) => t.key === tab)?.label}`}
                 />
                 <main style={{ flex: 1, padding: '24px 28px', overflowY: 'auto' }}>
-                    {tab === 'requests' && <RequestsTab onToast={showToast} />}
+                    {tab === 'requests'  && <RequestsTab onToast={showToast} />}
                     {tab === 'inventory' && <InventoryTab onToast={showToast} />}
-                    {tab === 'donors' && <DonorsTab onToast={showToast} />}
-                    {tab === 'camps' && <CampsTab onToast={showToast} />}
+                    {tab === 'donors'    && <DonorsTab onToast={showToast} />}
+                    {tab === 'camps'     && <CampsTab onToast={showToast} />}
+                    {tab === 'history'   && <HistoryTab onToast={showToast} />}
+                    {tab === 'reports'   && <ReportsTab onToast={showToast} />}
                 </main>
             </div>
         </div>

@@ -355,7 +355,7 @@ export default function RiderDashboard({ onLogout }) {
   const [tab, setTab]     = useState('tasks');
   const [toast, setToast] = useState(null);
   const showToast = useCallback((msg, type='success') => setToast({ msg, type }), []);
-  const name = localStorage.getItem('entityName') || localStorage.getItem('name') || 'Rider';
+  const name = localStorage.getItem('name') || localStorage.getItem('entityName') || 'Rider';
 
   return (
     <div style={{ minHeight:'100vh', backgroundColor: RC.pinkSoft }}>

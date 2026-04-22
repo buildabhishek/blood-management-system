@@ -121,15 +121,24 @@ public class BloodRequestService {
 
     // ── BLOOD BANK ────────────────────────────────────────────────────────────
     public List<BloodRequest> getBloodBankRequests(String phone) {
-        // Show requests directed at this bank + any unassigned pending
-        List<BloodRequest> assigned = requestRepo.findByBloodBank_Phone(phone);
-        List<BloodRequest> unassigned = requestRepo.findByBloodBankIsNull();
+        // Show only active (non-terminal) requests directed at this bank
+        List<RequestStatus> activeStatuses = List.of(
+            RequestStatus.PENDING, RequestStatus.ACCEPTED,
+            RequestStatus.ASSIGNED, RequestStatus.IN_TRANSIT);
+        List<BloodRequest> assigned = requestRepo.findByBloodBank_PhoneAndStatusIn(phone, activeStatuses);
+        List<BloodRequest> unassigned = requestRepo.findByBloodBankIsNullAndStatusIn(
+            List.of(RequestStatus.PENDING));
         List<BloodRequest> combined = new ArrayList<>(assigned);
         for (BloodRequest u : unassigned) {
             if (combined.stream().noneMatch(a -> a.getId().equals(u.getId())))
                 combined.add(u);
         }
         return combined;
+    }
+
+    public List<BloodRequest> getBloodBankHistory(String phone) {
+        return requestRepo.findByBloodBank_PhoneAndStatusIn(phone,
+            List.of(RequestStatus.DELIVERED, RequestStatus.REJECTED, RequestStatus.CANCELLED));
     }
 
     @Transactional
@@ -206,9 +215,10 @@ public class BloodRequestService {
             throw new RuntimeException("Rider " + rider.getName() + " already has " + activeTasks +
                     " active delivery in progress. Please assign a different rider to avoid overloading.");
 
-        // Generate 4-digit delivery OTP
+        // Generate 4-digit delivery OTP with 24-hour expiry
         String otp = String.format("%04d", rng.nextInt(10000));
         req.setDeliveryOtp(otp);
+        req.setOtpExpiry(java.time.LocalDateTime.now().plusHours(24));
 
         req.setRider(rider);
         req.setStatus(RequestStatus.ASSIGNED);
@@ -262,6 +272,9 @@ public class BloodRequestService {
                 if (otpProvided == null || otpProvided.isBlank())
                     throw new RuntimeException(
                             "Delivery OTP is required to confirm delivery. Ask the hospital for the OTP.");
+                if (req.getOtpExpiry() != null && java.time.LocalDateTime.now().isAfter(req.getOtpExpiry()))
+                    throw new RuntimeException(
+                            "Delivery OTP has expired. Please contact the blood bank to re-assign.");
                 if (!req.getDeliveryOtp().equals(otpProvided.trim()))
                     throw new RuntimeException(
                             "Incorrect OTP. Please ask the hospital to verify and provide the correct 4-digit code.");

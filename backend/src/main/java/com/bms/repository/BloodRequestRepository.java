@@ -21,7 +21,9 @@ public interface BloodRequestRepository extends JpaRepository<BloodRequest, Long
     List<BloodRequest> findByHospital_PhoneAndStatusNotIn(String phone, List<RequestStatus> statuses);
     List<BloodRequest> findByBloodBank_Phone(String phone);
     List<BloodRequest> findByBloodBank_PhoneAndStatusIn(String phone, List<RequestStatus> statuses);
+    List<BloodRequest> findByBloodBank_PhoneAndStatusNotIn(String phone, List<RequestStatus> statuses);
     List<BloodRequest> findByBloodBankIsNull();
+    List<BloodRequest> findByBloodBankIsNullAndStatusIn(List<RequestStatus> statuses);
     List<BloodRequest> findByRider_Phone(String phone);
     List<BloodRequest> findByRider_PhoneAndStatusIn(String phone, List<RequestStatus> statuses);
     long countByStatus(RequestStatus status);

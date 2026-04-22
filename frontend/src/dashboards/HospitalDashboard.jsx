@@ -568,7 +568,7 @@ function TrackingSection({ onToast }) {
                         🏍 Rider: {r.riderName}
                       </p>
                     )}
-                    {r.status === 'ACCEPTED' && r.deliveryOtp && (
+                    {(r.status === 'ASSIGNED' || r.status === 'IN_TRANSIT') && r.deliveryOtp && (
                       <div style={{ marginTop: '6px', padding: '7px 12px', borderRadius: '8px',
                         backgroundColor: RC.cardYellow, border: '1.5px solid #FFD54F', display: 'inline-block' }}>
                         <p style={{ margin: 0, fontSize: '12px', fontWeight: 700, color: '#E65100' }}>

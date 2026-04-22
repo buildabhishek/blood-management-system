@@ -8,13 +8,12 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 
 import java.util.List;
-import java.util.Optional;
 
 public interface BloodInventoryRepository extends JpaRepository<BloodInventory, Long> {
 
     List<BloodInventory> findByBloodBank_Phone(String phone);
 
-    Optional<BloodInventory> findByBloodBank_IdAndBloodGroup(Long bloodBankId, BloodGroup bloodGroup);
+    // findByBloodBank_IdAndBloodGroup removed — use findAllByBloodBank_IdAndBloodGroup (returns List)
 
     List<BloodInventory> findAllByBloodBank_IdAndBloodGroup(Long bloodBankId, BloodGroup bloodGroup);
 

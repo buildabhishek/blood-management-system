@@ -25,10 +25,10 @@ public class AdminController {
             BloodRequestRepository requestRepository,
             BloodInventoryRepository inventoryRepository,
             UserService userService) {
-        this.userRepository      = userRepository;
-        this.requestRepository   = requestRepository;
+        this.userRepository = userRepository;
+        this.requestRepository = requestRepository;
         this.inventoryRepository = inventoryRepository;
-        this.userService         = userService;
+        this.userService = userService;
     }
 
     @GetMapping("/users")
@@ -68,14 +68,15 @@ public class AdminController {
 
     @GetMapping("/reports/requests-summary")
     public ResponseEntity<Map<String, Long>> requestsSummary() {
-        return ResponseEntity.ok(Map.of(
-            "total",     requestRepository.count(),
-            "pending",   requestRepository.countByStatus(RequestStatus.PENDING),
-            "accepted",  requestRepository.countByStatus(RequestStatus.ACCEPTED),
-            "assigned",  requestRepository.countByStatus(RequestStatus.ASSIGNED),
-            "inTransit", requestRepository.countByStatus(RequestStatus.IN_TRANSIT),
-            "delivered", requestRepository.countByStatus(RequestStatus.DELIVERED),
-            "rejected",  requestRepository.countByStatus(RequestStatus.REJECTED)
-        ));
+        Map<String, Long> summary = new java.util.LinkedHashMap<>();
+        summary.put("total", requestRepository.count());
+        summary.put("pending", requestRepository.countByStatus(RequestStatus.PENDING));
+        summary.put("accepted", requestRepository.countByStatus(RequestStatus.ACCEPTED));
+        summary.put("assigned", requestRepository.countByStatus(RequestStatus.ASSIGNED));
+        summary.put("inTransit", requestRepository.countByStatus(RequestStatus.IN_TRANSIT));
+        summary.put("delivered", requestRepository.countByStatus(RequestStatus.DELIVERED));
+        summary.put("rejected", requestRepository.countByStatus(RequestStatus.REJECTED));
+        summary.put("cancelled", requestRepository.countByStatus(RequestStatus.CANCELLED));
+        return ResponseEntity.ok(summary);
     }
 }

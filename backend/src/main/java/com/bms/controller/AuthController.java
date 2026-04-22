@@ -75,6 +75,7 @@ public class AuthController {
             resp.put("token",        accessToken);
             resp.put("refreshToken", refresh.getToken());
             resp.put("role",         dbUser.getRole().name());
+            resp.put("name",         dbUser.getName());
             if (dbUser.getEntityName() != null) resp.put("entityName", dbUser.getEntityName());
 
             return ResponseEntity.ok(resp);

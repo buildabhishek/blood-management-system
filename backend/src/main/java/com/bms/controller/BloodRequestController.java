@@ -62,6 +62,12 @@ public class BloodRequestController {
     }
 
     @PreAuthorize("hasRole('BLOOD_BANK')")
+    @GetMapping("/blood-bank/history")
+    public List<BloodRequest> getBloodBankHistory(Authentication auth) {
+        return service.getBloodBankHistory(auth.getName());
+    }
+
+    @PreAuthorize("hasRole('BLOOD_BANK')")
     @PutMapping("/{id}/status")
     public ResponseEntity<?> updateStatus(@PathVariable Long id,
             @Valid @RequestBody StatusDto dto, Authentication auth) {
