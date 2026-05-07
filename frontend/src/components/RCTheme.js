@@ -1,51 +1,42 @@
-// RC Foundation Brand Colors — extracted from official PPT
 export const RC = {
-  // Primary
-  crimson:        '#C2175B',  // main brand — headers, buttons, active states
-  crimsonDark:    '#9C1348',  // hover states
-  crimsonLight:   '#F48FB1',  // subtle accents
+  // Brand
+  crimson:      '#C2175B',
+  crimsonDark:  '#9C1348',
+  crimsonLight: '#F48FB1',
+  pinkBg:       '#FBE4EC',
+  pinkSoft:     '#FDE8F0',
 
-  // Backgrounds
-  pinkBg:         '#FBE4EC',  // light pink — card backgrounds
-  pinkSoft:       '#FDE8F0',  // very light pink — page tones
-  whiteBg:        '#FFFFFF',
+  // Success / green
+  green:        '#43A047',
+  greenDark:    '#2E7D32',
+  greenLight:   '#E8F5E9',
+  greenMid:     '#A5D6A7',
 
-  // Green family
-  green:          '#66BB6A',  // accent stripe, success badges
-  greenDark:      '#2F7D32',  // dark headers, strong text
-  greenLight:     '#E8F6E9',  // light green cards
-  greenMid:       '#A5D6A7',  // mid-tone
-
-  // Card accent colors (from slide 2 cards)
-  cardPink:       '#FBE4EC',
-  cardGreen:      '#E8F6E9',
-  cardYellow:     '#FFF8E1',
-  cardBlue:       '#E3F2FD',
-  cardOrange:     '#FFF3E0',
-
-  // Footer / strip
-  footerPink:     '#E48FAC',
-  footerGreen:    '#66BB6A',
+  // Status card backgrounds
+  cardPink:     '#FBE4EC',
+  cardGreen:    '#E8F5E9',
+  cardYellow:   '#FFF8E1',
+  cardBlue:     '#E3F2FD',
+  cardOrange:   '#FFF3E0',
 
   // Text
-  textDark:       '#1A1A2E',
-  textMid:        '#4A4A6A',
-  textMuted:      '#888888',
-  textOnCrimson:  '#FFFFFF',
-  textOnGreen:    '#FFFFFF',
+  textDark:     '#1A1A2E',
+  textMid:      '#4A4A6A',
+  textMuted:    '#9E9E9E',
+
+  // Utility
+  border:       '#E8E8F0',
+  surface:      '#FFFFFF',
+  bg:           '#F8F4F6',
 };
 
-// Tailwind inline-style helpers (since we can't extend tailwind config at runtime)
-export const rcStyle = {
-  bgCrimson:    { backgroundColor: RC.crimson },
-  bgPink:       { backgroundColor: RC.pinkBg },
-  bgGreen:      { backgroundColor: RC.green },
-  bgGreenDark:  { backgroundColor: RC.greenDark },
-  bgGreenLight: { backgroundColor: RC.greenLight },
-  bgYellow:     { backgroundColor: RC.cardYellow },
-  bgBlue:       { backgroundColor: RC.cardBlue },
-  textCrimson:  { color: RC.crimson },
-  textGreen:    { color: RC.greenDark },
-  borderCrimson:{ borderColor: RC.crimson },
-  borderGreen:  { borderColor: RC.green },
+// Status badge config — centralised so every dashboard is consistent
+export const STATUS_CONFIG = {
+  PENDING:    { bg: '#FFF8E1', color: '#E65100',  border: '#FFCC02', label: 'Pending'    },
+  ACCEPTED:   { bg: '#E8F5E9', color: '#2E7D32',  border: '#81C784', label: 'Accepted'   },
+  REJECTED:   { bg: '#FBE4EC', color: '#C2175B',  border: '#F48FB1', label: 'Rejected'   },
+  CANCELLED:  { bg: '#F5F5F5', color: '#757575',  border: '#BDBDBD', label: 'Cancelled'  },
+  ASSIGNED:   { bg: '#EDE7F6', color: '#512DA8',  border: '#B39DDB', label: 'Assigned'   },
+  IN_TRANSIT: { bg: '#E3F2FD', color: '#1565C0',  border: '#90CAF9', label: 'In Transit' },
+  DELIVERED:  { bg: '#E8F5E9', color: '#2E7D32',  border: '#81C784', label: 'Delivered'  },
 };

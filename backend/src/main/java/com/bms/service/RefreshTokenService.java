@@ -1,7 +1,6 @@
 package com.bms.service;
 
-import com.bms.entity.RefreshToken;
-import com.bms.entity.User;
+import com.bms.entity.*;
 import com.bms.repository.RefreshTokenRepository;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -12,31 +11,23 @@ import java.util.UUID;
 
 @Service
 public class RefreshTokenService {
-
     private final RefreshTokenRepository repo;
+    @Value("${jwt.refresh-expiration:604800000}") private long refreshMs;
 
-    @Value("${jwt.refresh-expiration:604800000}")
-    private long refreshExpirationMs;
-
-    public RefreshTokenService(RefreshTokenRepository repo) {
-        this.repo = repo;
-    }
+    public RefreshTokenService(RefreshTokenRepository repo) { this.repo = repo; }
 
     @Transactional
     public RefreshToken create(User user) {
-        // Revoke any existing token for this user
         repo.deleteByUser(user);
-
-        RefreshToken token = new RefreshToken();
-        token.setUser(user);
-        token.setToken(UUID.randomUUID().toString());
-        token.setExpiryDate(Instant.now().plusMillis(refreshExpirationMs));
-        return repo.save(token);
+        RefreshToken rt = new RefreshToken();
+        rt.setUser(user);
+        rt.setToken(UUID.randomUUID().toString());
+        rt.setExpiryDate(Instant.now().plusMillis(refreshMs));
+        return repo.save(rt);
     }
 
     public RefreshToken findByToken(String token) {
-        return repo.findByToken(token)
-                .orElseThrow(() -> new RuntimeException("Refresh token not found or already used"));
+        return repo.findByToken(token).orElseThrow(() -> new RuntimeException("Refresh token not found or already used."));
     }
 
     @Transactional

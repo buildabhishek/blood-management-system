@@ -1,2565 +1,797 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { apiFetch } from '../api/api';
-import RCCard from '../components/RCCard';
 import RCSidebar from '../components/RCSidebar';
-import { RC } from '../components/RCTheme';
 import RCToast from '../components/RCToast';
+import RCCard from '../components/RCCard';
+import { RC, STATUS_CONFIG } from '../components/RCTheme';
 
-const BLOOD_GROUPS = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
-const CATEGORIES = ['Whole Blood', 'PCV', 'FFP', 'SDP', 'Platelets'];
+const BG_LIST     = ['A+','A-','B+','B-','AB+','AB-','O+','O-'];
+const COMPONENTS  = ['Whole Blood','PCV','FFP','SDP','Platelets'];
+const URGENCY_CFG = {
+  CRITICAL: { bg: RC.crimson,    color: '#fff',          label: '🚨 CRITICAL' },
+  URGENT:   { bg: RC.pinkBg,     color: RC.crimson,      label: '⚡ URGENT'   },
+  NORMAL:   { bg: '#F5F5F5',     color: RC.textMuted,    label: 'Normal'      },
+};
 
 const TABS = [
-    { key: 'requests',  icon: '🩸',  label: 'Requests'  },
-    { key: 'inventory', icon: '📦',  label: 'Inventory' },
-    { key: 'donors',    icon: '👤',  label: 'Donors'    },
-    { key: 'camps',     icon: '🏕️', label: 'Camps'     },
-    { key: 'history',   icon: '📋',  label: 'History'   },
-    { key: 'reports',   icon: '📊',  label: 'Reports'   },
+  { key: 'requests',  icon: '📥', label: 'Requests'  },
+  { key: 'inventory', icon: '🧪', label: 'Inventory' },
+  { key: 'donors',    icon: '👥', label: 'Donors'    },
+  { key: 'camps',     icon: '🏕',  label: 'Camps'     },
+  { key: 'reports',   icon: '📊', label: 'Reports'   },
 ];
 
-function PageHeader({ title }) {
-    return (
-        <div
-            style={{
-                backgroundColor: RC.pinkBg,
-                borderBottom: `2px solid ${RC.crimsonLight}`,
-                padding: '14px 28px',
-            }}
-        >
-            <h2 style={{ margin: 0, fontWeight: 900, fontSize: '17px', color: RC.crimson }}>
-                {title}
-            </h2>
-        </div>
-    );
-}
+const SI = (err = false, extra = {}) => ({
+  width: '100%', padding: '9px 12px', borderRadius: '9px', fontSize: '13px',
+  color: RC.textDark, outline: 'none', boxSizing: 'border-box',
+  border: `1.5px solid ${err ? RC.crimson : RC.border}`,
+  backgroundColor: '#fff', fontFamily: 'inherit',
+  transition: 'border-color 0.15s',
+  ...extra,
+});
 
 function StatusBadge({ status }) {
-    const map = {
-        PENDING: { bg: RC.cardYellow, color: '#E65100' },
-        ACCEPTED: { bg: RC.greenLight, color: RC.greenDark },
-        REJECTED: { bg: RC.pinkBg, color: RC.crimson },
-        CANCELLED: { bg: '#F5F5F5', color: '#888' },
-        ASSIGNED: { bg: '#EDE7F6', color: '#512DA8' },
-        IN_TRANSIT: { bg: RC.cardBlue, color: '#1565C0' },
-        DELIVERED: { bg: RC.greenLight, color: RC.greenDark },
-    };
-    const s = map[status] || { bg: '#F5F5F5', color: RC.textMid };
-    return (
-        <span
-            style={{
-                fontSize: '11px',
-                fontWeight: 700,
-                padding: '3px 9px',
-                borderRadius: '20px',
-                backgroundColor: s.bg,
-                color: s.color,
-                whiteSpace: 'nowrap',
-            }}
-        >
-            {status?.replace('_', ' ')}
-        </span>
-    );
+  const cfg = STATUS_CONFIG[status] || { bg: '#F5F5F5', color: RC.textMuted, label: status };
+  return (
+    <span style={{
+      fontSize: '11px', fontWeight: 700, padding: '3px 10px', borderRadius: '20px',
+      backgroundColor: cfg.bg, color: cfg.color, border: `1px solid ${cfg.border || '#E0E0E0'}`,
+      whiteSpace: 'nowrap',
+    }}>
+      {cfg.label}
+    </span>
+  );
 }
 
-/* ── Receipt Viewer Modal ──────────────────────────────────────── */
-function ReceiptModal({ request, onClose }) {
-    if (!request?.receiptData) return null;
-    const src = `data:${request.receiptMimeType};base64,${request.receiptData}`;
-    return (
-        <div
-            style={{
-                position: 'fixed',
-                inset: 0,
-                zIndex: 2000,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                backgroundColor: 'rgba(0,0,0,0.65)',
-            }}
-            onClick={onClose}
-        >
-            <div
-                style={{
-                    background: '#fff',
-                    borderRadius: '16px',
-                    padding: '20px',
-                    maxWidth: '680px',
-                    width: '94vw',
-                    maxHeight: '85vh',
-                    overflow: 'auto',
-                }}
-                onClick={(e) => e.stopPropagation()}
-            >
-                <div
-                    style={{
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                        marginBottom: '14px',
-                    }}
-                >
-                    <p style={{ margin: 0, fontWeight: 900, color: RC.crimson, fontSize: '15px' }}>
-                        📎 {request.receiptFileName || 'Receipt'} — {request.patientName}
-                    </p>
-                    <button
-                        onClick={onClose}
-                        style={{
-                            background: 'none',
-                            border: 'none',
-                            fontSize: '22px',
-                            cursor: 'pointer',
-                            color: RC.textMid,
-                            lineHeight: 1,
-                        }}
-                    >
-                        ×
-                    </button>
-                </div>
-                {request.receiptMimeType === 'application/pdf' ? (
-                    <embed
-                        src={src}
-                        type="application/pdf"
-                        style={{ width: '100%', height: '480px', borderRadius: '8px' }}
-                    />
-                ) : (
-                    <img
-                        src={src}
-                        alt="Receipt"
-                        style={{ width: '100%', borderRadius: '8px', objectFit: 'contain' }}
-                    />
-                )}
-                <a
-                    href={src}
-                    download={request.receiptFileName || 'receipt'}
-                    style={{
-                        display: 'block',
-                        marginTop: '12px',
-                        textAlign: 'center',
-                        color: RC.crimson,
-                        fontWeight: 700,
-                        fontSize: '13px',
-                        textDecoration: 'none',
-                    }}
-                >
-                    ⬇ Download Receipt
-                </a>
-            </div>
-        </div>
-    );
+function UrgencyBadge({ urgency }) {
+  const cfg = URGENCY_CFG[urgency] || URGENCY_CFG.NORMAL;
+  return (
+    <span style={{
+      fontSize: '11px', fontWeight: 700, padding: '3px 8px', borderRadius: '20px',
+      backgroundColor: cfg.bg, color: cfg.color, whiteSpace: 'nowrap',
+    }}>
+      {cfg.label}
+    </span>
+  );
 }
 
-/* ── Rider Assign Confirmation Modal ─────────────────────────── */
-function AssignRiderModal({ request, riders, onConfirm, onClose }) {
-    const [selectedRider, setSelected] = useState('');
-    const [loading, setLoading] = useState(false);
-    const available = riders.filter((r) => r.available);
-    const busy = riders.filter((r) => !r.available);
-
-    const handleConfirm = async () => {
-        if (!selectedRider) {
-            alert('Please select a rider first.');
-            return;
-        }
-        const rider = riders.find((r) => r.id === +selectedRider);
-        if (!rider) return;
-        if (
-            !window.confirm(
-                `Assign "${rider.name}" to deliver ${request.bloodGroup} for patient ${request.patientName}?\n\n` +
-                    `This rider currently has ${rider.activeTasks} active task(s).`
-            )
-        )
-            return;
-        setLoading(true);
-        await onConfirm(request.id, +selectedRider);
-        setLoading(false);
-    };
-
-    return (
-        <div
-            style={{
-                position: 'fixed',
-                inset: 0,
-                zIndex: 2000,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                backgroundColor: 'rgba(0,0,0,0.6)',
-            }}
-            onClick={onClose}
-        >
-            <div
-                style={{
-                    background: '#fff',
-                    borderRadius: '16px',
-                    padding: '24px',
-                    maxWidth: '460px',
-                    width: '92vw',
-                    boxShadow: '0 12px 40px rgba(0,0,0,0.2)',
-                }}
-                onClick={(e) => e.stopPropagation()}
-            >
-                <h3
-                    style={{
-                        margin: '0 0 6px',
-                        fontWeight: 900,
-                        color: RC.crimson,
-                        fontSize: '16px',
-                    }}
-                >
-                    🏍 Assign Delivery Rider
-                </h3>
-                <p style={{ margin: '0 0 16px', fontSize: '13px', color: RC.textMid }}>
-                    Request #{request.id} · {request.bloodGroup} · {request.quantity} unit
-                    {request.quantity > 1 ? 's' : ''} →{' '}
-                    <strong>{request.hospitalName || 'Hospital'}</strong>
-                </p>
-
-                {available.length === 0 && busy.length === 0 && (
-                    <div
-                        style={{
-                            padding: '16px',
-                            borderRadius: '10px',
-                            backgroundColor: RC.pinkBg,
-                            border: `1.5px solid ${RC.crimsonLight}`,
-                            marginBottom: '16px',
-                        }}
-                    >
-                        <p
-                            style={{
-                                margin: 0,
-                                fontWeight: 700,
-                                color: RC.crimson,
-                                fontSize: '13px',
-                            }}
-                        >
-                            ⚠ No riders registered in the system yet.
-                        </p>
-                        <p style={{ margin: '4px 0 0', fontSize: '12px', color: RC.textMuted }}>
-                            Ask the admin to register riders before assignment.
-                        </p>
-                    </div>
-                )}
-
-                {available.length > 0 && (
-                    <div style={{ marginBottom: '14px' }}>
-                        <p
-                            style={{
-                                margin: '0 0 8px',
-                                fontSize: '12px',
-                                fontWeight: 700,
-                                color: RC.greenDark,
-                            }}
-                        >
-                            ✅ Available Riders ({available.length})
-                        </p>
-                        {available.map((r) => (
-                            <label
-                                key={r.id}
-                                style={{
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: '10px',
-                                    padding: '10px 14px',
-                                    marginBottom: '6px',
-                                    borderRadius: '10px',
-                                    cursor: 'pointer',
-                                    border: `2px solid ${selectedRider === r.id ? RC.greenDark : RC.greenMid}`,
-                                    backgroundColor:
-                                        selectedRider === r.id ? RC.greenLight : '#FAFAFA',
-                                    transition: 'all 0.15s',
-                                }}
-                            >
-                                <input
-                                    type="radio"
-                                    name="rider"
-                                    value={r.id}
-                                    checked={selectedRider === r.id}
-                                    onChange={() => setSelected(r.id)}
-                                    style={{ accentColor: RC.greenDark }}
-                                />
-                                <div style={{ flex: 1 }}>
-                                    <p
-                                        style={{
-                                            margin: 0,
-                                            fontWeight: 700,
-                                            fontSize: '14px',
-                                            color: RC.textDark,
-                                        }}
-                                    >
-                                        {r.name}
-                                    </p>
-                                    <p
-                                        style={{
-                                            margin: '2px 0 0',
-                                            fontSize: '12px',
-                                            color: RC.greenDark,
-                                        }}
-                                    >
-                                        ✅ Free — no active deliveries
-                                    </p>
-                                </div>
-                                <span
-                                    style={{
-                                        fontSize: '11px',
-                                        fontWeight: 700,
-                                        padding: '3px 9px',
-                                        borderRadius: '20px',
-                                        backgroundColor: RC.greenLight,
-                                        color: RC.greenDark,
-                                        border: `1px solid ${RC.greenMid}`,
-                                    }}
-                                >
-                                    Available
-                                </span>
-                            </label>
-                        ))}
-                    </div>
-                )}
-
-                {busy.length > 0 && (
-                    <div style={{ marginBottom: '16px' }}>
-                        <p
-                            style={{
-                                margin: '0 0 8px',
-                                fontSize: '12px',
-                                fontWeight: 700,
-                                color: '#E65100',
-                            }}
-                        >
-                            ⚠ Busy Riders ({busy.length}) — Will increase their load
-                        </p>
-                        {busy.map((r) => (
-                            <label
-                                key={r.id}
-                                style={{
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: '10px',
-                                    padding: '10px 14px',
-                                    marginBottom: '6px',
-                                    borderRadius: '10px',
-                                    cursor: 'pointer',
-                                    border: `2px solid ${selectedRider === r.id ? '#E65100' : '#FFD54F'}`,
-                                    backgroundColor:
-                                        selectedRider === r.id ? RC.cardYellow : '#FFFBF0',
-                                    transition: 'all 0.15s',
-                                }}
-                            >
-                                <input
-                                    type="radio"
-                                    name="rider"
-                                    value={r.id}
-                                    checked={selectedRider === r.id}
-                                    onChange={() => setSelected(r.id)}
-                                    style={{ accentColor: '#E65100' }}
-                                />
-                                <div style={{ flex: 1 }}>
-                                    <p
-                                        style={{
-                                            margin: 0,
-                                            fontWeight: 700,
-                                            fontSize: '14px',
-                                            color: RC.textDark,
-                                        }}
-                                    >
-                                        {r.name}
-                                    </p>
-                                    <p
-                                        style={{
-                                            margin: '2px 0 0',
-                                            fontSize: '12px',
-                                            color: '#E65100',
-                                        }}
-                                    >
-                                        ⚠ Has {r.activeTasks} active delivery in progress
-                                    </p>
-                                </div>
-                                <span
-                                    style={{
-                                        fontSize: '11px',
-                                        fontWeight: 700,
-                                        padding: '3px 9px',
-                                        borderRadius: '20px',
-                                        backgroundColor: RC.cardYellow,
-                                        color: '#E65100',
-                                        border: '1px solid #FFD54F',
-                                    }}
-                                >
-                                    Busy
-                                </span>
-                            </label>
-                        ))}
-                    </div>
-                )}
-
-                <div
-                    style={{
-                        display: 'flex',
-                        gap: '10px',
-                        justifyContent: 'flex-end',
-                        marginTop: '8px',
-                    }}
-                >
-                    <button
-                        onClick={onClose}
-                        style={{
-                            padding: '9px 20px',
-                            borderRadius: '10px',
-                            fontSize: '13px',
-                            fontWeight: 700,
-                            backgroundColor: '#E0E0E0',
-                            color: RC.textMid,
-                            border: 'none',
-                            cursor: 'pointer',
-                        }}
-                    >
-                        Cancel
-                    </button>
-                    <button
-                        onClick={handleConfirm}
-                        disabled={!selectedRider || loading}
-                        style={{
-                            padding: '9px 20px',
-                            borderRadius: '10px',
-                            fontSize: '13px',
-                            fontWeight: 900,
-                            backgroundColor: selectedRider ? RC.crimson : '#C0C0C0',
-                            color: '#fff',
-                            border: 'none',
-                            cursor: selectedRider ? 'pointer' : 'not-allowed',
-                            opacity: loading ? 0.7 : 1,
-                        }}
-                    >
-                        {loading ? 'Assigning...' : '✓ Confirm Assignment'}
-                    </button>
-                </div>
-            </div>
-        </div>
-    );
+function SectionHeader({ title, subtitle, action }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '20px' }}>
+      <div>
+        <h3 style={{ margin: 0, fontWeight: 900, fontSize: '18px', color: RC.textDark }}>{title}</h3>
+        {subtitle && <p style={{ margin: '3px 0 0', fontSize: '12px', color: RC.textMuted }}>{subtitle}</p>}
+      </div>
+      {action}
+    </div>
+  );
 }
 
-/* ── Rejection Modal ─────────────────────────────────────────── */
-function RejectModal({ request, onConfirm, onClose }) {
-    const [reason, setReason] = useState('');
-    const [loading, setLoading] = useState(false);
-
-    const handle = async () => {
-        setLoading(true);
-        await onConfirm(request.id, reason);
-        setLoading(false);
-    };
-
-    return (
-        <div
-            style={{
-                position: 'fixed',
-                inset: 0,
-                zIndex: 2000,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                backgroundColor: 'rgba(0,0,0,0.6)',
-            }}
-            onClick={onClose}
-        >
-            <div
-                style={{
-                    background: '#fff',
-                    borderRadius: '16px',
-                    padding: '24px',
-                    maxWidth: '420px',
-                    width: '92vw',
-                    boxShadow: '0 12px 40px rgba(0,0,0,0.2)',
-                }}
-                onClick={(e) => e.stopPropagation()}
-            >
-                <h3
-                    style={{
-                        margin: '0 0 6px',
-                        fontWeight: 900,
-                        color: RC.crimson,
-                        fontSize: '16px',
-                    }}
-                >
-                    ✕ Reject Blood Request
-                </h3>
-                <p style={{ margin: '0 0 14px', fontSize: '13px', color: RC.textMid }}>
-                    {request.patientName} · {request.bloodGroup} · {request.quantity} units
-                </p>
-                <label
-                    style={{
-                        fontSize: '12px',
-                        fontWeight: 700,
-                        display: 'block',
-                        marginBottom: '6px',
-                        color: RC.textMid,
-                    }}
-                >
-                    Reason for rejection (shown to hospital)
-                </label>
-                <textarea
-                    value={reason}
-                    rows={3}
-                    placeholder="e.g. Insufficient stock of this blood group currently..."
-                    onChange={(e) => setReason(e.target.value)}
-                    style={{
-                        width: '100%',
-                        padding: '9px 12px',
-                        borderRadius: '9px',
-                        fontSize: '13px',
-                        border: `1.5px solid ${RC.crimsonLight}`,
-                        outline: 'none',
-                        resize: 'none',
-                        boxSizing: 'border-box',
-                        color: RC.textDark,
-                    }}
-                />
-                <div
-                    style={{
-                        display: 'flex',
-                        gap: '10px',
-                        justifyContent: 'flex-end',
-                        marginTop: '14px',
-                    }}
-                >
-                    <button
-                        onClick={onClose}
-                        style={{
-                            padding: '9px 20px',
-                            borderRadius: '10px',
-                            fontSize: '13px',
-                            fontWeight: 700,
-                            backgroundColor: '#E0E0E0',
-                            color: RC.textMid,
-                            border: 'none',
-                            cursor: 'pointer',
-                        }}
-                    >
-                        Go Back
-                    </button>
-                    <button
-                        onClick={handle}
-                        disabled={loading}
-                        style={{
-                            padding: '9px 20px',
-                            borderRadius: '10px',
-                            fontSize: '13px',
-                            fontWeight: 900,
-                            backgroundColor: RC.crimson,
-                            color: '#fff',
-                            border: 'none',
-                            cursor: 'pointer',
-                            opacity: loading ? 0.7 : 1,
-                        }}
-                    >
-                        {loading ? 'Rejecting...' : '✕ Confirm Rejection'}
-                    </button>
-                </div>
-            </div>
-        </div>
-    );
-}
-
-/* ── Requests Tab ─────────────────────────────────────────────── */
+/* ── Requests Tab ─────────────────────────────────────────────────────────── */
 function RequestsTab({ onToast }) {
-    const [requests, setRequests] = useState([]);
-    const [riders, setRiders] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [assignReq, setAssignReq] = useState(null);
-    const [rejectReq, setRejectReq] = useState(null);
-    const [viewRec, setViewRec] = useState(null);
-    const [filter, setFilter] = useState('PENDING');
+  const [requests, setRequests] = useState([]);
+  const [loading,  setLoading]  = useState(true);
+  const [actionId, setActionId] = useState(null);
+  const [rejectId, setRejectId] = useState(null);
+  const [rejectReason,       setRejectReason]       = useState('');
+  const [customRejectReason, setCustomRejectReason] = useState('');
+  const [riders,   setRiders]   = useState([]);
+  const [assignId, setAssignId] = useState(null);
+  const [riderId,  setRiderId]  = useState('');
+  const [filter,   setFilter]   = useState('PENDING');
 
-    const load = useCallback(async () => {
-        try {
-            const [reqs, rids] = await Promise.all([
-                apiFetch('/requests/blood-bank'),
-                apiFetch('/users/riders').catch(() => []),
-            ]);
-            setRequests(reqs || []);
-            setRiders(rids || []);
-        } catch (e) {
-            onToast('Failed to load requests: ' + e.message, 'error');
-            setRequests([]);
-        } finally {
-            setLoading(false);
-        }
-    }, [onToast]);
+  const load = useCallback(async () => {
+    try { setRequests(await apiFetch('/requests/bank') || []); }
+    catch { setRequests([]); } finally { setLoading(false); }
+  }, []);
 
-    useEffect(() => {
-        load();
-    }, [load]);
+  useEffect(() => { load(); const t = setInterval(load, 8000); return () => clearInterval(t); }, [load]);
 
-    const [processing, setProcessing] = useState({});
+  const accept = async (id) => {
+    setActionId(id);
+    try { await apiFetch(`/requests/${id}/status`, { method: 'PUT', body: JSON.stringify({ status: 'ACCEPTED' }) }); onToast('✅ Request accepted.'); load(); }
+    catch (e) { onToast('❌ ' + e.message, 'error'); } finally { setActionId(null); }
+  };
 
-    const updateStatus = async (id, status, reason) => {
-        if (processing[id]) return; // 🚫 prevent double click
-        setProcessing((p) => ({ ...p, [id]: true }));
+  const reject = async () => {
+    const effectiveReason = rejectReason === 'Other' ? customRejectReason.trim() : rejectReason.trim();
+    if (!effectiveReason) { onToast('Please provide a rejection reason.', 'error'); return; }
+    setActionId(rejectId);
+    try {
+      await apiFetch(`/requests/${rejectId}/status`, { method: 'PUT', body: JSON.stringify({ status: 'REJECTED', reason: effectiveReason }) });
+      onToast('Request rejected.'); setRejectId(null); setRejectReason(''); setCustomRejectReason(''); load();
+    } catch (e) { onToast('❌ ' + e.message, 'error'); } finally { setActionId(null); }
+  };
 
-        try {
-            await apiFetch(`/requests/${id}/status`, {
-                method: 'PUT',
-                body: JSON.stringify({
-                    status,
-                    reason: reason?.trim() || '',
-                }),
-            });
+  const openAssign = async (id) => {
+    setAssignId(id); setRiderId('');
+    try { setRiders(await apiFetch('/users/riders') || []); } catch { setRiders([]); }
+  };
 
-            onToast(
-                `Request ${status === 'ACCEPTED' ? '✅ accepted' : '✕ rejected'} successfully.`
-            );
-            setRejectReq(null);
-            load();
-        } catch (e) {
-            onToast('❌ ' + e.message, 'error');
-            load(); // 🔥 refresh if error
-        } finally {
-            setProcessing((p) => ({ ...p, [id]: false }));
-        }
-    };
+  const assign = async () => {
+    if (!riderId) { onToast('Please select a rider.', 'error'); return; }
+    setActionId(assignId);
+    try {
+      await apiFetch(`/requests/${assignId}/assign-rider`, { method: 'PUT', body: JSON.stringify({ riderId: +riderId }) });
+      onToast('🏍 Rider assigned!'); setAssignId(null); setRiderId(''); load();
+    } catch (e) { onToast('❌ ' + e.message, 'error'); } finally { setActionId(null); }
+  };
 
-    const doAssignRider = async (reqId, riderId) => {
-        try {
-            await apiFetch(`/requests/${reqId}/assign-rider`, {
-                method: 'PUT',
-                body: JSON.stringify({ riderId }),
-            });
-            setAssignReq(null);
-            onToast('🏍 Rider assigned successfully! Delivery OTP has been generated.');
-            load();
-        } catch (e) {
-            onToast('❌ ' + e.message, 'error');
-        }
-    };
+  const FILTERS = ['PENDING','ACCEPTED','ASSIGNED','IN_TRANSIT','DELIVERED','REJECTED'];
+  const counts  = Object.fromEntries(FILTERS.map(f => [f, requests.filter(r => r.status === f).length]));
+  const visible = requests.filter(r => filter === 'ALL' || r.status === filter);
 
-    const filtered = filter === 'ALL' ? requests : requests.filter((r) => r.status === filter);
-    const pending = requests.filter((r) => r.status === 'PENDING').length;
+  return (
+    <div>
+      {/* Filter pills */}
+      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '20px' }}>
+        {FILTERS.map(f => {
+          const cfg = STATUS_CONFIG[f] || {};
+          const active = filter === f;
+          return (
+            <button key={f} onClick={() => setFilter(f)} style={{
+              padding: '5px 14px', borderRadius: '20px', fontSize: '12px', fontWeight: 700,
+              border: `1.5px solid ${active ? RC.crimson : RC.border}`,
+              backgroundColor: active ? RC.crimson : '#fff',
+              color: active ? '#fff' : RC.textMid,
+              cursor: 'pointer', transition: 'all 0.15s',
+              display: 'flex', alignItems: 'center', gap: '5px',
+            }}>
+              {f.replace('_', ' ')}
+              {counts[f] > 0 && (
+                <span style={{
+                  backgroundColor: active ? 'rgba(255,255,255,0.3)' : cfg.bg || '#F5F5F5',
+                  color: active ? '#fff' : cfg.color || RC.textMid,
+                  borderRadius: '10px', padding: '0 6px', fontSize: '10px', fontWeight: 900,
+                }}>
+                  {counts[f]}
+                </span>
+              )}
+            </button>
+          );
+        })}
+        <button onClick={load} style={{
+          marginLeft: 'auto', padding: '5px 14px', borderRadius: '20px', fontSize: '12px',
+          fontWeight: 700, backgroundColor: RC.greenLight, color: RC.greenDark,
+          border: `1.5px solid ${RC.greenMid}`, cursor: 'pointer',
+        }}>↻ Refresh</button>
+      </div>
 
-    const FILTERS = [
-        'ALL',
-        'PENDING',
-        'ACCEPTED',
-        'ASSIGNED',
-        'IN_TRANSIT',
-    ];
-
-    return (
-        <div>
-            {assignReq && (
-                <AssignRiderModal
-                    request={assignReq}
-                    riders={riders}
-                    onConfirm={doAssignRider}
-                    onClose={() => setAssignReq(null)}
-                />
-            )}
-            {rejectReq && (
-                <RejectModal
-                    request={rejectReq}
-                    onConfirm={async (id, reason) => {
-                        await load(); // 🔥 refresh before action
-                        updateStatus(id, 'REJECTED', reason);
-                    }}
-                    onClose={() => setRejectReq(null)}
-                />
-            )}
-            {viewRec && <ReceiptModal request={viewRec} onClose={() => setViewRec(null)} />}
-
-            {/* Toolbar */}
-            <div
-                style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    marginBottom: '14px',
-                    flexWrap: 'wrap',
-                    gap: '8px',
-                }}
-            >
-                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                    {pending > 0 && (
-                        <span
-                            style={{
-                                padding: '4px 12px',
-                                borderRadius: '20px',
-                                fontSize: '12px',
-                                fontWeight: 900,
-                                backgroundColor: RC.pinkBg,
-                                border: `2px solid ${RC.crimson}`,
-                                color: RC.crimson,
-                            }}
-                        >
-                            {pending} pending action{pending > 1 ? 's' : ''}
+      {loading ? (
+        <div style={{ textAlign: 'center', padding: '60px', color: RC.textMuted }}>⏳ Loading…</div>
+      ) : visible.length === 0 ? (
+        <RCCard variant="green" style={{ padding: '48px', textAlign: 'center' }}>
+          <p style={{ fontSize: '36px', margin: '0 0 8px' }}>✅</p>
+          <p style={{ fontWeight: 700, color: RC.greenDark, margin: 0 }}>No {filter.replace('_', ' ').toLowerCase()} requests</p>
+        </RCCard>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          {[...visible]
+            .sort((a, b) => {
+              const w = { CRITICAL: 3, URGENT: 2, NORMAL: 1 };
+              return (w[b.urgency] || 0) - (w[a.urgency] || 0) || new Date(b.createdAt) - new Date(a.createdAt);
+            })
+            .map(r => (
+              <RCCard key={r.id} variant={r.urgency === 'CRITICAL' ? 'pink' : 'white'}
+                style={r.urgency === 'CRITICAL' ? { border: `2px solid ${RC.crimson}` } : {}}>
+                <div style={{ padding: '16px 18px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px', marginBottom: '10px' }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px', flexWrap: 'wrap' }}>
+                        <span style={{ fontWeight: 900, fontSize: '18px', color: RC.crimson }}>
+                          {r.bloodGroup}
                         </span>
-                    )}
-                </div>
-                <button
-                    onClick={load}
-                    style={{
-                        padding: '6px 14px',
-                        borderRadius: '8px',
-                        fontSize: '12px',
-                        fontWeight: 700,
-                        backgroundColor: RC.greenLight,
-                        color: RC.greenDark,
-                        border: `1px solid ${RC.greenMid}`,
-                        cursor: 'pointer',
-                    }}
-                >
-                    ↻ Refresh
-                </button>
-            </div>
-
-            {/* Filter row */}
-            <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap', marginBottom: '16px' }}>
-                {FILTERS.map((f) => (
-                    <button
-                        key={f}
-                        onClick={() => setFilter(f)}
-                        style={{
-                            padding: '4px 12px',
-                            borderRadius: '20px',
-                            fontSize: '11px',
-                            fontWeight: 700,
-                            border: '1.5px solid',
-                            cursor: 'pointer',
-                            transition: 'all 0.15s',
-                            backgroundColor: filter === f ? RC.crimson : '#fff',
-                            color: filter === f ? '#fff' : RC.crimson,
-                            borderColor: filter === f ? RC.crimsonDark : RC.crimsonLight,
-                        }}
-                    >
-                        {f} {f !== 'ALL' && `(${requests.filter((r) => r.status === f).length})`}
-                    </button>
-                ))}
-            </div>
-
-            {loading ? (
-                <div style={{ textAlign: 'center', padding: '40px', color: RC.textMuted }}>
-                    Loading...
-                </div>
-            ) : filtered.length === 0 ? (
-                <RCCard variant="green" style={{ padding: '30px', textAlign: 'center' }}>
-                    <p style={{ color: RC.greenDark, fontWeight: 600, margin: 0 }}>
-                        No requests in this category.
-                    </p>
-                </RCCard>
-            ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-                    {[...filtered]
-                        .sort((a, b) => (b.urgency === 'URGENT') - (a.urgency === 'URGENT'))
-                        .map((r) => (
-                            <RCCard
-                                key={r.id}
-                                variant={r.urgency === 'URGENT' ? 'pink' : 'white'}
-                                style={
-                                    r.urgency === 'URGENT'
-                                        ? { border: `2px solid ${RC.crimson}` }
-                                        : {}
-                                }
-                            >
-                                <div style={{ padding: '16px' }}>
-                                    {r.urgency === 'URGENT' && (
-                                        <p
-                                            style={{
-                                                margin: '0 0 8px',
-                                                fontSize: '11px',
-                                                fontWeight: 900,
-                                                textTransform: 'uppercase',
-                                                letterSpacing: '0.5px',
-                                                color: RC.crimson,
-                                            }}
-                                        >
-                                            🚨 Emergency / Urgent Request
-                                        </p>
-                                    )}
-                                    <div
-                                        style={{
-                                            display: 'flex',
-                                            justifyContent: 'space-between',
-                                            alignItems: 'flex-start',
-                                            gap: '12px',
-                                        }}
-                                    >
-                                        <div style={{ flex: 1 }}>
-                                            <div
-                                                style={{
-                                                    display: 'flex',
-                                                    gap: '16px',
-                                                    flexWrap: 'wrap',
-                                                    marginBottom: '6px',
-                                                }}
-                                            >
-                                                <span
-                                                    style={{
-                                                        fontSize: '11px',
-                                                        fontWeight: 700,
-                                                        color: RC.textMuted,
-                                                    }}
-                                                >
-                                                    REQUEST #{r.id}
-                                                </span>
-                                                <span
-                                                    style={{
-                                                        fontSize: '11px',
-                                                        color: RC.textMuted,
-                                                    }}
-                                                >
-                                                    {r.createdAt
-                                                        ? new Date(r.createdAt).toLocaleString(
-                                                              'en-IN'
-                                                          )
-                                                        : ''}
-                                                </span>
-                                            </div>
-                                            <div
-                                                style={{
-                                                    display: 'grid',
-                                                    gridTemplateColumns: '1fr 1fr',
-                                                    gap: '4px 20px',
-                                                    fontSize: '13px',
-                                                }}
-                                            >
-                                                <p style={{ margin: 0 }}>
-                                                    <span
-                                                        style={{
-                                                            color: RC.textMuted,
-                                                            fontSize: '11px',
-                                                        }}
-                                                    >
-                                                        Patient:
-                                                    </span>{' '}
-                                                    <strong style={{ color: RC.textDark }}>
-                                                        {r.patientName}
-                                                    </strong>
-                                                </p>
-                                                <p style={{ margin: 0 }}>
-                                                    <span
-                                                        style={{
-                                                            color: RC.textMuted,
-                                                            fontSize: '11px',
-                                                        }}
-                                                    >
-                                                        Blood:
-                                                    </span>{' '}
-                                                    <strong
-                                                        style={{
-                                                            color: RC.crimson,
-                                                            fontSize: '15px',
-                                                        }}
-                                                    >
-                                                        {r.bloodGroup}
-                                                    </strong>
-                                                </p>
-                                                <p style={{ margin: 0 }}>
-                                                    <span
-                                                        style={{
-                                                            color: RC.textMuted,
-                                                            fontSize: '11px',
-                                                        }}
-                                                    >
-                                                        Qty:
-                                                    </span>{' '}
-                                                    <strong style={{ color: RC.textDark }}>
-                                                        {r.quantity} units
-                                                    </strong>
-                                                </p>
-                                                <p style={{ margin: 0 }}>
-                                                    <span
-                                                        style={{
-                                                            color: RC.textMuted,
-                                                            fontSize: '11px',
-                                                        }}
-                                                    >
-                                                        Hospital:
-                                                    </span>{' '}
-                                                    <span style={{ color: RC.textMid }}>
-                                                        {r.hospitalName || '—'}
-                                                    </span>
-                                                </p>
-                                            </div>
-                                            {r.notes && (
-                                                <p
-                                                    style={{
-                                                        margin: '6px 0 0',
-                                                        fontSize: '12px',
-                                                        fontStyle: 'italic',
-                                                        color: RC.textMuted,
-                                                    }}
-                                                >
-                                                    📝 "{r.notes}"
-                                                </p>
-                                            )}
-                                            {r.rejectionReason && (
-                                                <p
-                                                    style={{
-                                                        margin: '6px 0 0',
-                                                        fontSize: '12px',
-                                                        color: RC.crimson,
-                                                    }}
-                                                >
-                                                    Rejection reason: {r.rejectionReason}
-                                                </p>
-                                            )}
-                                            {r.riderName && (
-                                                <p
-                                                    style={{
-                                                        margin: '6px 0 0',
-                                                        fontSize: '12px',
-                                                        fontWeight: 700,
-                                                        color: RC.greenDark,
-                                                    }}
-                                                >
-                                                    🏍 Rider: {r.riderName}
-                                                </p>
-                                            )}
-                                        </div>
-                                        <div
-                                            style={{
-                                                display: 'flex',
-                                                flexDirection: 'column',
-                                                alignItems: 'flex-end',
-                                                gap: '6px',
-                                            }}
-                                        >
-                                            <StatusBadge status={r.status} />
-                                            {r.hasReceipt && (
-                                                <button
-                                                    onClick={() => setViewRec(r)}
-                                                    style={{
-                                                        padding: '4px 10px',
-                                                        borderRadius: '7px',
-                                                        fontSize: '11px',
-                                                        fontWeight: 700,
-                                                        backgroundColor: RC.cardBlue,
-                                                        color: '#1565C0',
-                                                        border: '1px solid #90CAF9',
-                                                        cursor: 'pointer',
-                                                    }}
-                                                >
-                                                    📎 Receipt
-                                                </button>
-                                            )}
-                                        </div>
-                                    </div>
-
-                                    {/* Actions */}
-                                    {r.status === 'PENDING' && (
-                                        <div
-                                            style={{
-                                                display: 'flex',
-                                                gap: '8px',
-                                                marginTop: '14px',
-                                            }}
-                                        >
-                                            <button
-                                                onClick={async () => {
-                                                    await load();
-                                                    updateStatus(r.id, 'ACCEPTED');
-                                                }}
-                                                style={{
-                                                    padding: '8px 18px',
-                                                    borderRadius: '9px',
-                                                    fontSize: '13px',
-                                                    fontWeight: 900,
-                                                    backgroundColor: RC.greenDark,
-                                                    color: '#fff',
-                                                    border: 'none',
-                                                    cursor: 'pointer',
-                                                }}
-                                            >
-                                                ✓ Accept
-                                            </button>
-                                            <button
-                                                onClick={() => setRejectReq(r)}
-                                                style={{
-                                                    padding: '8px 18px',
-                                                    borderRadius: '9px',
-                                                    fontSize: '13px',
-                                                    fontWeight: 900,
-                                                    backgroundColor: RC.pinkBg,
-                                                    color: RC.crimson,
-                                                    border: `1.5px solid ${RC.crimsonLight}`,
-                                                    cursor: 'pointer',
-                                                }}
-                                            >
-                                                ✕ Reject with Reason
-                                            </button>
-                                        </div>
-                                    )}
-
-                                    {r.status === 'ACCEPTED' && !r.riderId && (
-                                        <button
-                                            onClick={() => setAssignReq(r)}
-                                            style={{
-                                                marginTop: '12px',
-                                                padding: '8px 18px',
-                                                borderRadius: '9px',
-                                                fontSize: '13px',
-                                                fontWeight: 900,
-                                                backgroundColor: RC.cardBlue,
-                                                color: '#1565C0',
-                                                border: '1.5px solid #90CAF9',
-                                                cursor: 'pointer',
-                                            }}
-                                        >
-                                            🏍 Assign Rider
-                                        </button>
-                                    )}
-                                </div>
-                            </RCCard>
-                        ))}
-                </div>
-            )}
-        </div>
-    );
-}
-
-/* ── Inventory Tab ────────────────────────────────────────────── */
-function InventoryTab({ onToast }) {
-    const [inventory, setInventory] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [showForm, setShowForm] = useState(false);
-    const [form, setForm] = useState({
-        bloodGroup: 'A+',
-        quantity: 1,
-        category: 'Whole Blood',
-        collectionDate: '',
-        expiryDate: '',
-    });
-
-    const load = useCallback(async () => {
-        try {
-            setInventory((await apiFetch('/inventory/my')) || []);
-        } catch (e) {
-            onToast('Failed to load inventory: ' + e.message, 'error');
-        } finally {
-            setLoading(false);
-        }
-    }, [onToast]);
-    useEffect(() => {
-        load();
-    }, [load]);
-
-    const handleAdd = async () => {
-        if (!form.collectionDate || !form.expiryDate) {
-            onToast('⚠ Collection date and expiry date are required.', 'error');
-            return;
-        }
-        if (new Date(form.expiryDate) <= new Date(form.collectionDate)) {
-            onToast('⚠ Expiry date must be after the collection date.', 'error');
-            return;
-        }
-        if (form.quantity < 1 || form.quantity > 500) {
-            onToast('⚠ Quantity must be between 1 and 500 units.', 'error');
-            return;
-        }
-        try {
-            await apiFetch('/inventory', {
-                method: 'POST',
-                body: JSON.stringify({ ...form, quantity: +form.quantity }),
-            });
-            setShowForm(false);
-            setForm({
-                bloodGroup: 'A+',
-                quantity: 1,
-                category: 'Whole Blood',
-                collectionDate: '',
-                expiryDate: '',
-            });
-            onToast('✅ Blood units added to inventory successfully.');
-            load();
-        } catch (e) {
-            onToast('❌ ' + e.message, 'error');
-        }
-    };
-
-    const expiryStatus = (d) => {
-        if (!d) return null;
-        const days = (new Date(d) - new Date()) / 86400000;
-        if (days < 0) return { color: RC.crimson, label: '⚠ Expired', bg: RC.pinkBg };
-        if (days < 3)
-            return { color: '#B71C1C', label: `🚨 ${Math.floor(days)}d left`, bg: '#FFEBEE' };
-        if (days < 7)
-            return { color: '#E65100', label: `⚠ ${Math.floor(days)}d left`, bg: RC.cardOrange };
-        return { color: RC.greenDark, label: `${Math.floor(days)}d left`, bg: RC.greenLight };
-    };
-
-    const stock = BLOOD_GROUPS.reduce((acc, g) => {
-        const qty = inventory.filter((i) => i.bloodGroup === g).reduce((s, i) => s + i.quantity, 0);
-        if (qty > 0) acc[g] = qty;
-        return acc;
-    }, {});
-
-    const expiredCount = inventory.filter(
-        (i) => i.expiryDate && new Date(i.expiryDate) < new Date()
-    ).length;
-
-    return (
-        <div>
-            {expiredCount > 0 && (
-                <RCCard
-                    variant="pink"
-                    style={{
-                        padding: '12px 16px',
-                        marginBottom: '14px',
-                        border: `2px solid ${RC.crimson}`,
-                    }}
-                >
-                    <p style={{ margin: 0, fontWeight: 900, fontSize: '13px', color: RC.crimson }}>
-                        🚨 {expiredCount} expired unit{expiredCount > 1 ? 's' : ''} in inventory —
-                        please remove them immediately.
-                    </p>
-                </RCCard>
-            )}
-
-            <div
-                style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    marginBottom: '14px',
-                }}
-            >
-                <div />
-                <button
-                    onClick={() => setShowForm(!showForm)}
-                    style={{
-                        padding: '8px 18px',
-                        borderRadius: '9px',
-                        fontSize: '13px',
-                        fontWeight: 700,
-                        backgroundColor: showForm ? '#E0E0E0' : RC.crimson,
-                        color: showForm ? RC.textMid : '#fff',
-                        border: 'none',
-                        cursor: 'pointer',
-                    }}
-                >
-                    {showForm ? '✕ Cancel' : '+ Add Blood Units'}
-                </button>
-            </div>
-
-            {Object.keys(stock).length > 0 && (
-                <div style={{ marginBottom: '18px' }}>
-                    <p
-                        style={{
-                            fontSize: '11px',
-                            fontWeight: 900,
-                            marginBottom: '8px',
-                            color: RC.textMid,
-                        }}
-                    >
-                        CURRENT STOCK BY BLOOD GROUP
-                    </p>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                        {BLOOD_GROUPS.filter((g) => stock[g]).map((g) => (
-                            <div
-                                key={g}
-                                style={{
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: '6px',
-                                    padding: '6px 12px',
-                                    borderRadius: '20px',
-                                    backgroundColor: RC.pinkBg,
-                                    border: `2px solid ${RC.crimsonLight}`,
-                                }}
-                            >
-                                <span
-                                    style={{ fontWeight: 900, color: RC.crimson, fontSize: '13px' }}
-                                >
-                                    {g}
-                                </span>
-                                <span
-                                    style={{
-                                        padding: '2px 7px',
-                                        borderRadius: '10px',
-                                        fontSize: '12px',
-                                        fontWeight: 900,
-                                        backgroundColor: RC.crimson,
-                                        color: '#fff',
-                                    }}
-                                >
-                                    {stock[g]}
-                                </span>
-                            </div>
-                        ))}
-                    </div>
-                </div>
-            )}
-
-            {showForm && (
-                <RCCard variant="pink" style={{ padding: '18px', marginBottom: '18px' }}>
-                    <p
-                        style={{
-                            margin: '0 0 14px',
-                            fontWeight: 900,
-                            fontSize: '14px',
-                            color: RC.crimson,
-                        }}
-                    >
-                        Add Blood Units
-                    </p>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                        {[
-                            {
-                                key: 'bloodGroup',
-                                label: 'Blood Group',
-                                type: 'select',
-                                opts: BLOOD_GROUPS,
-                            },
-                            {
-                                key: 'category',
-                                label: 'Category',
-                                type: 'select',
-                                opts: CATEGORIES,
-                            },
-                            { key: 'collectionDate', label: 'Collection Date', type: 'date' },
-                            { key: 'expiryDate', label: 'Expiry Date', type: 'date' },
-                        ].map(({ key, label, type, opts }) => (
-                            <div key={key}>
-                                <label
-                                    style={{
-                                        fontSize: '12px',
-                                        fontWeight: 700,
-                                        display: 'block',
-                                        marginBottom: '5px',
-                                        color: RC.textMid,
-                                    }}
-                                >
-                                    {label} <span style={{ color: RC.crimson }}>*</span>
-                                </label>
-                                {type === 'select' ? (
-                                    <select
-                                        value={form[key]}
-                                        onChange={(e) =>
-                                            setForm((f) => ({ ...f, [key]: e.target.value }))
-                                        }
-                                        style={{
-                                            width: '100%',
-                                            padding: '8px 10px',
-                                            borderRadius: '8px',
-                                            fontSize: '13px',
-                                            border: `1.5px solid ${RC.crimsonLight}`,
-                                            outline: 'none',
-                                        }}
-                                    >
-                                        {opts.map((o) => (
-                                            <option key={o}>{o}</option>
-                                        ))}
-                                    </select>
-                                ) : (
-                                    <input
-                                        type={type}
-                                        value={form[key]}
-                                        onChange={(e) =>
-                                            setForm((f) => ({ ...f, [key]: e.target.value }))
-                                        }
-                                        style={{
-                                            width: '100%',
-                                            padding: '8px 10px',
-                                            borderRadius: '8px',
-                                            fontSize: '13px',
-                                            border: `1.5px solid ${RC.crimsonLight}`,
-                                            outline: 'none',
-                                            boxSizing: 'border-box',
-                                        }}
-                                    />
-                                )}
-                            </div>
-                        ))}
-                        <div>
-                            <label
-                                style={{
-                                    fontSize: '12px',
-                                    fontWeight: 700,
-                                    display: 'block',
-                                    marginBottom: '5px',
-                                    color: RC.textMid,
-                                }}
-                            >
-                                Quantity (units) <span style={{ color: RC.crimson }}>*</span>
-                            </label>
-                            <input
-                                type="number"
-                                min="1"
-                                max="500"
-                                value={form.quantity}
-                                onChange={(e) =>
-                                    setForm((f) => ({ ...f, quantity: +e.target.value || 1 }))
-                                }
-                                style={{
-                                    width: '100%',
-                                    padding: '8px 10px',
-                                    borderRadius: '8px',
-                                    fontSize: '13px',
-                                    border: `1.5px solid ${RC.crimsonLight}`,
-                                    outline: 'none',
-                                    boxSizing: 'border-box',
-                                }}
-                            />
-                        </div>
-                        <div style={{ display: 'flex', alignItems: 'flex-end' }}>
-                            <button
-                                onClick={handleAdd}
-                                style={{
-                                    width: '100%',
-                                    padding: '10px',
-                                    borderRadius: '9px',
-                                    fontSize: '13px',
-                                    fontWeight: 900,
-                                    backgroundColor: RC.crimson,
-                                    color: '#fff',
-                                    border: 'none',
-                                    cursor: 'pointer',
-                                }}
-                            >
-                                ✓ Save Units
-                            </button>
-                        </div>
-                    </div>
-                </RCCard>
-            )}
-
-            {loading ? (
-                <div style={{ textAlign: 'center', padding: '40px', color: RC.textMuted }}>
-                    Loading inventory...
-                </div>
-            ) : inventory.length === 0 ? (
-                <RCCard variant="green" style={{ padding: '30px', textAlign: 'center' }}>
-                    <p style={{ color: RC.greenDark, fontWeight: 600, margin: 0 }}>
-                        No inventory yet. Add your first blood units above.
-                    </p>
-                </RCCard>
-            ) : (
-                <RCCard variant="white" style={{ overflow: 'hidden' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
-                        <thead>
-                            <tr
-                                style={{
-                                    backgroundColor: RC.pinkBg,
-                                    borderBottom: `2px solid ${RC.crimsonLight}`,
-                                }}
-                            >
-                                {[
-                                    'Blood Group',
-                                    'Category',
-                                    'Qty',
-                                    'Collected',
-                                    'Expiry',
-                                    'Status',
-                                ].map((h) => (
-                                    <th
-                                        key={h}
-                                        style={{
-                                            textAlign: 'left',
-                                            padding: '10px 14px',
-                                            fontSize: '11px',
-                                            fontWeight: 900,
-                                            color: RC.crimson,
-                                        }}
-                                    >
-                                        {h}
-                                    </th>
-                                ))}
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {inventory.map((item, i) => {
-                                const exp = expiryStatus(item.expiryDate);
-                                return (
-                                    <tr
-                                        key={item.id}
-                                        style={{
-                                            backgroundColor: i % 2 === 0 ? '#fff' : RC.pinkSoft,
-                                            borderBottom: '1px solid #F5E0E8',
-                                        }}
-                                    >
-                                        <td
-                                            style={{
-                                                padding: '10px 14px',
-                                                fontWeight: 900,
-                                                color: RC.crimson,
-                                            }}
-                                        >
-                                            {item.bloodGroup}
-                                        </td>
-                                        <td style={{ padding: '10px 14px', color: RC.textMid }}>
-                                            {item.category}
-                                        </td>
-                                        <td
-                                            style={{
-                                                padding: '10px 14px',
-                                                fontWeight: 700,
-                                                color: RC.textDark,
-                                            }}
-                                        >
-                                            {item.quantity}
-                                        </td>
-                                        <td style={{ padding: '10px 14px', color: RC.textMuted }}>
-                                            {item.collectionDate || '—'}
-                                        </td>
-                                        <td style={{ padding: '10px 14px', color: RC.textMuted }}>
-                                            {item.expiryDate || '—'}
-                                        </td>
-                                        <td style={{ padding: '10px 14px' }}>
-                                            {exp && (
-                                                <span
-                                                    style={{
-                                                        fontSize: '11px',
-                                                        fontWeight: 700,
-                                                        padding: '3px 8px',
-                                                        borderRadius: '20px',
-                                                        backgroundColor: exp.bg,
-                                                        color: exp.color,
-                                                    }}
-                                                >
-                                                    {exp.label}
-                                                </span>
-                                            )}
-                                        </td>
-                                    </tr>
-                                );
-                            })}
-                        </tbody>
-                    </table>
-                </RCCard>
-            )}
-        </div>
-    );
-}
-
-/* ── Donors Tab ───────────────────────────────────────────────── */
-function DonorsTab({ onToast }) {
-    const [donors, setDonors] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [showForm, setShowForm] = useState(false);
-    const [form, setForm] = useState({ name: '', phone: '', bloodGroup: 'A+', lastDonation: '' });
-    const [search, setSearch] = useState('');
-
-    const load = useCallback(async () => {
-        try {
-            setDonors((await apiFetch('/donors/my')) || []);
-        } catch (e) {
-            onToast('Failed to load donors: ' + e.message, 'error');
-        } finally {
-            setLoading(false);
-        }
-    }, [onToast]);
-    useEffect(() => {
-        load();
-    }, [load]);
-
-    const handleAdd = async () => {
-        if (!form.name.trim() || form.name.trim().length < 2) {
-            onToast('⚠ Donor name must be at least 2 characters.', 'error');
-            return;
-        }
-        if (!form.phone || !/^[0-9]{10,15}$/.test(form.phone.trim())) {
-            onToast('⚠ Phone must be 10–15 digits.', 'error');
-            return;
-        }
-        try {
-            await apiFetch('/donors', {
-                method: 'POST',
-                body: JSON.stringify({
-                    ...form,
-                    name: form.name.trim(),
-                    phone: form.phone.trim(),
-                    lastDonation: form.lastDonation || null,
-                }),
-            });
-            setShowForm(false);
-            setForm({ name: '', phone: '', bloodGroup: 'A+', lastDonation: '' });
-            onToast('✅ Donor registered successfully.');
-            load();
-        } catch (e) {
-            onToast('❌ ' + e.message, 'error');
-        }
-    };
-
-    const filtered = donors.filter(
-        (d) =>
-            d.name?.toLowerCase().includes(search.toLowerCase()) ||
-            d.phone?.includes(search) ||
-            d.bloodGroup?.toLowerCase().includes(search.toLowerCase())
-    );
-
-    const byGroup = BLOOD_GROUPS.reduce(
-        (acc, g) => ({
-            ...acc,
-            [g]: donors.filter((d) => d.bloodGroup === g).length,
-        }),
-        {}
-    );
-
-    return (
-        <div>
-            <div
-                style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    marginBottom: '14px',
-                    flexWrap: 'wrap',
-                    gap: '8px',
-                }}
-            >
-                <input
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    placeholder="🔍 Search by name, phone or blood group..."
-                    style={{
-                        padding: '8px 14px',
-                        borderRadius: '9px',
-                        border: `1.5px solid ${RC.crimsonLight}`,
-                        fontSize: '13px',
-                        outline: 'none',
-                        minWidth: '220px',
-                        flex: 1,
-                        maxWidth: '320px',
-                    }}
-                />
-                <button
-                    onClick={() => setShowForm(!showForm)}
-                    style={{
-                        padding: '8px 18px',
-                        borderRadius: '9px',
-                        fontSize: '13px',
-                        fontWeight: 700,
-                        backgroundColor: showForm ? '#E0E0E0' : RC.crimson,
-                        color: showForm ? RC.textMid : '#fff',
-                        border: 'none',
-                        cursor: 'pointer',
-                    }}
-                >
-                    {showForm ? '✕ Cancel' : '+ Register Donor'}
-                </button>
-            </div>
-
-            {/* Group summary pills */}
-            {donors.length > 0 && (
-                <div
-                    style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '16px' }}
-                >
-                    {BLOOD_GROUPS.filter((g) => byGroup[g] > 0).map((g) => (
-                        <span
-                            key={g}
-                            style={{
-                                padding: '4px 12px',
-                                borderRadius: '20px',
-                                fontSize: '12px',
-                                fontWeight: 700,
-                                backgroundColor: RC.pinkBg,
-                                border: `1.5px solid ${RC.crimsonLight}`,
-                                color: RC.crimson,
-                            }}
-                        >
-                            {g}: {byGroup[g]}
+                        <span style={{ fontWeight: 700, fontSize: '15px', color: RC.textDark }}>
+                          · {r.quantity} unit{r.quantity > 1 ? 's' : ''}
+                          {r.componentType && <span style={{ fontWeight: 400, fontSize: '13px', color: RC.textMuted }}> ({r.componentType})</span>}
                         </span>
-                    ))}
-                </div>
-            )}
+                        <UrgencyBadge urgency={r.urgency} />
+                      </div>
+                      <p style={{ margin: 0, fontSize: '13px', color: RC.textMid }}>
+                        🏥 <strong>{r.hospitalName || 'Hospital'}</strong>
+                        {r.patientName && <span style={{ color: RC.textMuted }}> · Patient: {r.patientName}</span>}
+                        {r.patientAge  && <span style={{ color: RC.textMuted }}> · Age {r.patientAge}</span>}
+                        {r.wardBed     && <span style={{ color: RC.textMuted }}> · {r.wardBed}</span>}
+                      </p>
+                      {r.notes && (
+                        <p style={{ margin: '4px 0 0', fontSize: '12px', color: RC.textMuted, fontStyle: 'italic' }}>
+                          📝 {r.notes}
+                        </p>
+                      )}
+                      {r.riderName && (
+                        <p style={{ margin: '4px 0 0', fontSize: '12px', fontWeight: 700, color: RC.greenDark }}>
+                          🏍 Rider: {r.riderName}
+                        </p>
+                      )}
+                      {r.rejectionReason && (
+                        <p style={{ margin: '4px 0 0', fontSize: '12px', color: RC.crimson, fontStyle: 'italic' }}>
+                          Reason: {r.rejectionReason}
+                        </p>
+                      )}
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px', flexShrink: 0 }}>
+                      <StatusBadge status={r.status} />
+                      <span style={{ fontSize: '11px', color: RC.textMuted }}>
+                        #{r.id} · {new Date(r.createdAt).toLocaleDateString('en-IN')}
+                      </span>
+                    </div>
+                  </div>
 
-            {showForm && (
-                <RCCard variant="pink" style={{ padding: '18px', marginBottom: '18px' }}>
-                    <p
+                  {/* Action buttons */}
+                  {r.status === 'PENDING' && (
+                    <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
+                      <button onClick={() => accept(r.id)} disabled={actionId === r.id}
                         style={{
-                            margin: '0 0 14px',
-                            fontWeight: 900,
-                            fontSize: '14px',
-                            color: RC.crimson,
-                        }}
-                    >
-                        Register New Donor
-                    </p>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                        {[
-                            ['name', 'Full Name', 'text'],
-                            ['phone', 'Phone Number', 'tel'],
-                            ['lastDonation', 'Last Donation', 'date'],
-                        ].map(([k, l, t]) => (
-                            <div key={k}>
-                                <label
-                                    style={{
-                                        fontSize: '12px',
-                                        fontWeight: 700,
-                                        display: 'block',
-                                        marginBottom: '5px',
-                                        color: RC.textMid,
-                                    }}
-                                >
-                                    {l}
-                                </label>
-                                <input
-                                    type={t}
-                                    value={form[k]}
-                                    onChange={(e) =>
-                                        setForm((f) => ({ ...f, [k]: e.target.value }))
-                                    }
-                                    placeholder={k === 'phone' ? '10-digit mobile number' : ''}
-                                    style={{
-                                        width: '100%',
-                                        padding: '8px 10px',
-                                        borderRadius: '8px',
-                                        fontSize: '13px',
-                                        border: `1.5px solid ${RC.crimsonLight}`,
-                                        outline: 'none',
-                                        boxSizing: 'border-box',
-                                    }}
-                                />
-                            </div>
-                        ))}
-                        <div>
-                            <label
-                                style={{
-                                    fontSize: '12px',
-                                    fontWeight: 700,
-                                    display: 'block',
-                                    marginBottom: '5px',
-                                    color: RC.textMid,
-                                }}
-                            >
-                                Blood Group
-                            </label>
-                            <select
-                                value={form.bloodGroup}
-                                onChange={(e) =>
-                                    setForm((f) => ({ ...f, bloodGroup: e.target.value }))
-                                }
-                                style={{
-                                    width: '100%',
-                                    padding: '8px 10px',
-                                    borderRadius: '8px',
-                                    fontSize: '13px',
-                                    border: `1.5px solid ${RC.crimsonLight}`,
-                                    outline: 'none',
-                                }}
-                            >
-                                {BLOOD_GROUPS.map((g) => (
-                                    <option key={g}>{g}</option>
-                                ))}
-                            </select>
-                        </div>
-                        <div style={{ display: 'flex', alignItems: 'flex-end' }}>
-                            <button
-                                onClick={handleAdd}
-                                style={{
-                                    width: '100%',
-                                    padding: '10px',
-                                    borderRadius: '9px',
-                                    fontSize: '13px',
-                                    fontWeight: 900,
-                                    backgroundColor: RC.crimson,
-                                    color: '#fff',
-                                    border: 'none',
-                                    cursor: 'pointer',
-                                }}
-                            >
-                                ✓ Save Donor
-                            </button>
-                        </div>
-                    </div>
-                </RCCard>
-            )}
-
-            {loading ? (
-                <div style={{ textAlign: 'center', padding: '40px', color: RC.textMuted }}>
-                    Loading donors...
-                </div>
-            ) : filtered.length === 0 ? (
-                <RCCard variant="green" style={{ padding: '30px', textAlign: 'center' }}>
-                    <p style={{ color: RC.greenDark, fontWeight: 600, margin: 0 }}>
-                        {donors.length === 0
-                            ? 'No donors registered yet.'
-                            : 'No donors match your search.'}
-                    </p>
-                </RCCard>
-            ) : (
-                <RCCard variant="white" style={{ overflow: 'hidden' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
-                        <thead>
-                            <tr
-                                style={{
-                                    backgroundColor: RC.pinkBg,
-                                    borderBottom: `2px solid ${RC.crimsonLight}`,
-                                }}
-                            >
-                                {[
-                                    'Name',
-                                    'Phone',
-                                    'Blood Group',
-                                    'Last Donation',
-                                    'Eligible Again',
-                                ].map((h) => (
-                                    <th
-                                        key={h}
-                                        style={{
-                                            textAlign: 'left',
-                                            padding: '10px 14px',
-                                            fontSize: '11px',
-                                            fontWeight: 900,
-                                            color: RC.crimson,
-                                        }}
-                                    >
-                                        {h}
-                                    </th>
-                                ))}
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {filtered.map((d, i) => {
-                                const eligible = d.lastDonation
-                                    ? new Date(d.lastDonation) <=
-                                      new Date(Date.now() - 90 * 86400000)
-                                    : true;
-                                const eligibleDate = d.lastDonation
-                                    ? new Date(
-                                          new Date(d.lastDonation).getTime() + 90 * 86400000
-                                      ).toLocaleDateString('en-IN')
-                                    : '—';
-                                return (
-                                    <tr
-                                        key={d.id}
-                                        style={{
-                                            backgroundColor: i % 2 === 0 ? '#fff' : RC.pinkSoft,
-                                            borderBottom: '1px solid #F5E0E8',
-                                        }}
-                                    >
-                                        <td
-                                            style={{
-                                                padding: '10px 14px',
-                                                fontWeight: 600,
-                                                color: RC.textDark,
-                                            }}
-                                        >
-                                            {d.name}
-                                        </td>
-                                        <td style={{ padding: '10px 14px', color: RC.textMid }}>
-                                            {d.phone}
-                                        </td>
-                                        <td
-                                            style={{
-                                                padding: '10px 14px',
-                                                fontWeight: 900,
-                                                color: RC.crimson,
-                                            }}
-                                        >
-                                            {d.bloodGroup}
-                                        </td>
-                                        <td style={{ padding: '10px 14px', color: RC.textMuted }}>
-                                            {d.lastDonation || '—'}
-                                        </td>
-                                        <td style={{ padding: '10px 14px' }}>
-                                            <span
-                                                style={{
-                                                    fontSize: '11px',
-                                                    fontWeight: 700,
-                                                    padding: '3px 8px',
-                                                    borderRadius: '20px',
-                                                    backgroundColor: eligible
-                                                        ? RC.greenLight
-                                                        : RC.cardYellow,
-                                                    color: eligible ? RC.greenDark : '#E65100',
-                                                }}
-                                            >
-                                                {eligible
-                                                    ? '✅ Eligible now'
-                                                    : `After ${eligibleDate}`}
-                                            </span>
-                                        </td>
-                                    </tr>
-                                );
-                            })}
-                        </tbody>
-                    </table>
-                </RCCard>
-            )}
-        </div>
-    );
-}
-
-/* ── Camps Tab ────────────────────────────────────────────────── */
-function CampsTab({ onToast }) {
-    const [camps, setCamps] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [showForm, setShowForm] = useState(false);
-    const [editing, setEditing] = useState(null);
-    const emptyUnits = () => BLOOD_GROUPS.reduce((a, g) => ({ ...a, [g]: 0 }), {});
-    const [form, setForm] = useState({
-        name: '',
-        location: '',
-        campDate: '',
-        latitude: '',
-        longitude: '',
-        bloodUnits: emptyUnits(),
-    });
-
-    const load = useCallback(async () => {
-        try {
-            setCamps((await apiFetch('/camps/my')) || []);
-        } catch (e) {
-            onToast('Failed to load camps: ' + e.message, 'error');
-        } finally {
-            setLoading(false);
-        }
-    }, [onToast]);
-    useEffect(() => {
-        load();
-    }, [load]);
-
-    const total = (u) => Object.values(u).reduce((s, v) => s + (+v || 0), 0);
-
-    const openEdit = (camp) => {
-        const units = emptyUnits();
-        if (camp.bloodUnitsJson) {
-            try {
-                Object.assign(units, JSON.parse(camp.bloodUnitsJson));
-            } catch {}
-        }
-        setEditing(camp);
-        setForm({
-            name: camp.name,
-            location: camp.location,
-            campDate: camp.campDate,
-            latitude: camp.latitude || '',
-            longitude: camp.longitude || '',
-            bloodUnits: units,
-        });
-        setShowForm(true);
-    };
-
-    const handleSave = async () => {
-        if (!form.name.trim() || !form.location.trim() || !form.campDate) {
-            onToast('⚠ Camp name, location, and date are required.', 'error');
-            return;
-        }
-        const payload = {
-            name: form.name.trim(),
-            location: form.location.trim(),
-            campDate: form.campDate,
-            latitude: form.latitude ? +form.latitude : null,
-            longitude: form.longitude ? +form.longitude : null,
-            totalUnitsCollected: total(form.bloodUnits),
-            bloodUnitsJson: JSON.stringify(form.bloodUnits),
-        };
-        try {
-            if (editing) {
-                await apiFetch(`/camps/${editing.id}`, {
-                    method: 'PUT',
-                    body: JSON.stringify(payload),
-                });
-                onToast('✅ Camp updated successfully.');
-            } else {
-                await apiFetch('/camps', { method: 'POST', body: JSON.stringify(payload) });
-                onToast('✅ Camp created successfully.');
-            }
-            setShowForm(false);
-            setEditing(null);
-            load();
-        } catch (e) {
-            onToast('❌ ' + e.message, 'error');
-        }
-    };
-
-    return (
-        <div>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '14px' }}>
-                <button
-                    onClick={() => {
-                        setEditing(null);
-                        setForm({
-                            name: '',
-                            location: '',
-                            campDate: '',
-                            latitude: '',
-                            longitude: '',
-                            bloodUnits: emptyUnits(),
-                        });
-                        setShowForm(true);
-                    }}
-                    style={{
-                        padding: '8px 18px',
-                        borderRadius: '9px',
-                        fontSize: '13px',
-                        fontWeight: 700,
-                        backgroundColor: RC.crimson,
-                        color: '#fff',
-                        border: 'none',
-                        cursor: 'pointer',
-                    }}
-                >
-                    + Create Camp
-                </button>
-            </div>
-
-            {showForm && (
-                <RCCard variant="pink" style={{ padding: '18px', marginBottom: '20px' }}>
-                    <p
+                          flex: 1, padding: '8px', borderRadius: '9px', fontWeight: 700, fontSize: '13px',
+                          backgroundColor: RC.greenDark, color: '#fff', border: 'none',
+                          cursor: actionId === r.id ? 'not-allowed' : 'pointer', opacity: actionId === r.id ? 0.6 : 1,
+                          transition: 'opacity 0.15s',
+                        }}>
+                        {actionId === r.id ? '⏳ Processing…' : '✅ Accept'}
+                      </button>
+                      <button onClick={() => { setRejectId(r.id); setRejectReason(''); setCustomRejectReason(''); }}
+                        disabled={actionId === r.id}
                         style={{
-                            margin: '0 0 14px',
-                            fontWeight: 900,
-                            fontSize: '14px',
-                            color: RC.crimson,
-                        }}
-                    >
-                        {editing ? '✏️ Edit Camp' : '🏕️ Create Blood Donation Camp'}
-                    </p>
-                    <div
-                        style={{
-                            display: 'grid',
-                            gridTemplateColumns: '1fr 1fr',
-                            gap: '12px',
-                            marginBottom: '16px',
-                        }}
-                    >
-                        {[
-                            ['name', 'Camp Name', 'text'],
-                            ['location', 'Location / Venue', 'text'],
-                            ['campDate', 'Camp Date', 'date'],
-                            ['latitude', 'Latitude (optional)', 'number'],
-                            ['longitude', 'Longitude (optional)', 'number'],
-                        ].map(([k, l, t]) => (
-                            <div key={k}>
-                                <label
-                                    style={{
-                                        fontSize: '12px',
-                                        fontWeight: 700,
-                                        display: 'block',
-                                        marginBottom: '5px',
-                                        color: RC.textMid,
-                                    }}
-                                >
-                                    {l}
-                                </label>
-                                <input
-                                    type={t}
-                                    value={form[k]}
-                                    onChange={(e) =>
-                                        setForm((f) => ({ ...f, [k]: e.target.value }))
-                                    }
-                                    style={{
-                                        width: '100%',
-                                        padding: '8px 10px',
-                                        borderRadius: '8px',
-                                        fontSize: '13px',
-                                        border: `1.5px solid ${RC.crimsonLight}`,
-                                        outline: 'none',
-                                        boxSizing: 'border-box',
-                                    }}
-                                />
-                            </div>
-                        ))}
+                          flex: 1, padding: '8px', borderRadius: '9px', fontWeight: 700, fontSize: '13px',
+                          backgroundColor: RC.pinkBg, color: RC.crimson,
+                          border: `1.5px solid ${RC.crimsonLight}`, cursor: 'pointer',
+                        }}>
+                        ✕ Reject
+                      </button>
                     </div>
-                    {/* Blood unit tracker */}
-                    <div
-                        style={{
-                            padding: '14px',
-                            borderRadius: '12px',
-                            backgroundColor: '#fff',
-                            border: `2px solid ${RC.crimsonLight}`,
-                            marginBottom: '14px',
-                        }}
-                    >
-                        <div
-                            style={{
-                                display: 'flex',
-                                justifyContent: 'space-between',
-                                alignItems: 'center',
-                                marginBottom: '12px',
-                            }}
-                        >
-                            <p
-                                style={{
-                                    margin: 0,
-                                    fontWeight: 900,
-                                    fontSize: '14px',
-                                    color: RC.crimson,
-                                }}
-                            >
-                                🩸 Units Collected by Blood Group
-                            </p>
-                            <span
-                                style={{
-                                    padding: '4px 14px',
-                                    borderRadius: '20px',
-                                    fontSize: '13px',
-                                    fontWeight: 900,
-                                    backgroundColor: RC.crimson,
-                                    color: '#fff',
-                                }}
-                            >
-                                Total: {total(form.bloodUnits)}
-                            </span>
-                        </div>
-                        <div
-                            style={{
-                                display: 'grid',
-                                gridTemplateColumns: 'repeat(4, 1fr)',
-                                gap: '10px',
-                            }}
-                        >
-                            {BLOOD_GROUPS.map((g) => (
-                                <div
-                                    key={g}
-                                    style={{
-                                        padding: '10px',
-                                        borderRadius: '10px',
-                                        textAlign: 'center',
-                                        backgroundColor:
-                                            form.bloodUnits[g] > 0 ? RC.pinkBg : '#F9F9F9',
-                                        border: `1.5px solid ${form.bloodUnits[g] > 0 ? RC.crimsonLight : '#E0E0E0'}`,
-                                    }}
-                                >
-                                    <p
-                                        style={{
-                                            margin: '0 0 6px',
-                                            fontWeight: 900,
-                                            fontSize: '13px',
-                                            color: RC.crimson,
-                                        }}
-                                    >
-                                        {g}
-                                    </p>
-                                    <input
-                                        type="number"
-                                        min="0"
-                                        value={form.bloodUnits[g]}
-                                        onChange={(e) =>
-                                            setForm((f) => ({
-                                                ...f,
-                                                bloodUnits: {
-                                                    ...f.bloodUnits,
-                                                    [g]: Math.max(0, +e.target.value || 0),
-                                                },
-                                            }))
-                                        }
-                                        style={{
-                                            width: '100%',
-                                            textAlign: 'center',
-                                            fontWeight: 900,
-                                            fontSize: '16px',
-                                            padding: '4px',
-                                            borderRadius: '8px',
-                                            border: `1.5px solid ${RC.crimsonLight}`,
-                                            outline: 'none',
-                                            color:
-                                                form.bloodUnits[g] > 0 ? RC.crimson : RC.textMuted,
-                                        }}
-                                    />
-                                    <p
-                                        style={{
-                                            margin: '4px 0 0',
-                                            fontSize: '10px',
-                                            color: RC.textMuted,
-                                        }}
-                                    >
-                                        units
-                                    </p>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                    <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
-                        <button
-                            onClick={() => setShowForm(false)}
-                            style={{
-                                padding: '9px 20px',
-                                borderRadius: '9px',
-                                fontSize: '13px',
-                                fontWeight: 700,
-                                backgroundColor: '#E0E0E0',
-                                color: RC.textMid,
-                                border: 'none',
-                                cursor: 'pointer',
-                            }}
-                        >
-                            Cancel
-                        </button>
-                        <button
-                            onClick={handleSave}
-                            style={{
-                                padding: '9px 20px',
-                                borderRadius: '9px',
-                                fontSize: '13px',
-                                fontWeight: 900,
-                                backgroundColor: RC.crimson,
-                                color: '#fff',
-                                border: 'none',
-                                cursor: 'pointer',
-                            }}
-                        >
-                            {editing ? 'Update Camp' : 'Save Camp'}
-                        </button>
-                    </div>
-                </RCCard>
-            )}
-
-            {loading ? (
-                <div style={{ textAlign: 'center', padding: '40px', color: RC.textMuted }}>
-                    Loading camps...
-                </div>
-            ) : camps.length === 0 ? (
-                <RCCard variant="green" style={{ padding: '30px', textAlign: 'center' }}>
-                    <p style={{ color: RC.greenDark, fontWeight: 600, margin: 0 }}>
-                        No camps created yet.
-                    </p>
-                </RCCard>
-            ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-                    {camps.map((camp) => {
-                        let units = null;
-                        if (camp.bloodUnitsJson) {
-                            try {
-                                units = JSON.parse(camp.bloodUnitsJson);
-                            } catch {}
-                        }
-                        const hasUnits = units && Object.values(units).some((v) => v > 0);
-                        return (
-                            <RCCard key={camp.id} variant="white" style={{ overflow: 'hidden' }}>
-                                <div
-                                    style={{
-                                        padding: '16px',
-                                        display: 'flex',
-                                        justifyContent: 'space-between',
-                                        alignItems: 'flex-start',
-                                        borderBottom: hasUnits
-                                            ? `1px solid ${RC.crimsonLight}`
-                                            : 'none',
-                                    }}
-                                >
-                                    <div style={{ flex: 1 }}>
-                                        <p
-                                            style={{
-                                                margin: '0 0 3px',
-                                                fontWeight: 900,
-                                                fontSize: '16px',
-                                                color: RC.textDark,
-                                            }}
-                                        >
-                                            {camp.name}
-                                        </p>
-                                        <p
-                                            style={{
-                                                margin: '0 0 2px',
-                                                fontSize: '13px',
-                                                color: RC.textMid,
-                                            }}
-                                        >
-                                            📍 {camp.location}
-                                        </p>
-                                        <p
-                                            style={{
-                                                margin: 0,
-                                                fontSize: '12px',
-                                                color: RC.textMuted,
-                                            }}
-                                        >
-                                            📅 {camp.campDate}
-                                        </p>
-                                        {camp.latitude && (
-                                            <p
-                                                style={{
-                                                    margin: '2px 0 0',
-                                                    fontSize: '11px',
-                                                    color: RC.textMuted,
-                                                }}
-                                            >
-                                                🗺 {parseFloat(camp.latitude).toFixed(4)},{' '}
-                                                {parseFloat(camp.longitude).toFixed(4)}
-                                            </p>
-                                        )}
-                                    </div>
-                                    <div style={{ textAlign: 'right', marginLeft: '16px' }}>
-                                        <div
-                                            style={{
-                                                fontSize: '32px',
-                                                fontWeight: 900,
-                                                color: RC.crimson,
-                                            }}
-                                        >
-                                            {camp.totalUnitsCollected || 0}
-                                        </div>
-                                        <div style={{ fontSize: '11px', color: RC.textMuted }}>
-                                            total units
-                                        </div>
-                                        <button
-                                            onClick={() => openEdit(camp)}
-                                            style={{
-                                                marginTop: '8px',
-                                                padding: '5px 12px',
-                                                borderRadius: '8px',
-                                                fontSize: '12px',
-                                                fontWeight: 700,
-                                                backgroundColor: RC.greenLight,
-                                                color: RC.greenDark,
-                                                border: `1px solid ${RC.greenMid}`,
-                                                cursor: 'pointer',
-                                            }}
-                                        >
-                                            ✏️ Edit
-                                        </button>
-                                    </div>
-                                </div>
-                                {hasUnits && (
-                                    <div
-                                        style={{
-                                            padding: '12px 16px',
-                                            backgroundColor: RC.pinkSoft,
-                                        }}
-                                    >
-                                        <p
-                                            style={{
-                                                margin: '0 0 8px',
-                                                fontSize: '11px',
-                                                fontWeight: 900,
-                                                color: RC.crimson,
-                                            }}
-                                        >
-                                            UNITS COLLECTED BY BLOOD GROUP
-                                        </p>
-                                        <div
-                                            style={{
-                                                display: 'flex',
-                                                flexWrap: 'wrap',
-                                                gap: '6px',
-                                            }}
-                                        >
-                                            {BLOOD_GROUPS.filter((g) => units[g] > 0).map((g) => (
-                                                <div
-                                                    key={g}
-                                                    style={{
-                                                        display: 'flex',
-                                                        alignItems: 'center',
-                                                        gap: '5px',
-                                                        padding: '4px 10px',
-                                                        borderRadius: '20px',
-                                                        backgroundColor: '#fff',
-                                                        border: `1.5px solid ${RC.crimsonLight}`,
-                                                    }}
-                                                >
-                                                    <span
-                                                        style={{
-                                                            fontWeight: 900,
-                                                            fontSize: '13px',
-                                                            color: RC.crimson,
-                                                        }}
-                                                    >
-                                                        {g}
-                                                    </span>
-                                                    <span
-                                                        style={{
-                                                            padding: '1px 6px',
-                                                            borderRadius: '10px',
-                                                            fontSize: '11px',
-                                                            fontWeight: 900,
-                                                            backgroundColor: RC.crimson,
-                                                            color: '#fff',
-                                                        }}
-                                                    >
-                                                        {units[g]}
-                                                    </span>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    </div>
-                                )}
-                            </RCCard>
-                        );
-                    })}
-                </div>
-            )}
-        </div>
-    );
-}
-
-/* ── Main ─────────────────────────────────────────────────────── */
-/* ── History Tab ──────────────────────────────────────────────── */
-function HistoryTab({ onToast }) {
-    const [history, setHistory] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [filter, setFilter] = useState('ALL');
-
-    useEffect(() => {
-        apiFetch('/requests/blood-bank/history')
-            .then((d) => setHistory(d || []))
-            .catch((e) => onToast('Failed to load history: ' + e.message, 'error'))
-            .finally(() => setLoading(false));
-    }, [onToast]);
-
-    const filtered = filter === 'ALL' ? history : history.filter((r) => r.status === filter);
-
-    const stats = [
-        { label: 'Total Fulfilled', value: history.filter((r) => r.status === 'DELIVERED').length, bg: RC.greenLight, color: RC.greenDark, border: RC.greenMid },
-        { label: 'Rejected',        value: history.filter((r) => r.status === 'REJECTED').length,  bg: RC.pinkBg,    color: RC.crimson,   border: RC.crimsonLight },
-        { label: 'Cancelled',       value: history.filter((r) => r.status === 'CANCELLED').length, bg: RC.cardYellow, color: '#E65100',   border: '#FFD54F' },
-        { label: 'Total Handled',   value: history.length,                                          bg: RC.cardBlue,  color: '#1565C0',   border: '#90CAF9' },
-    ];
-
-    return (
-        <div>
-            {/* Stats */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '12px', marginBottom: '20px' }}>
-                {stats.map((s) => (
-                    <div key={s.label} style={{ borderRadius: '12px', padding: '14px', textAlign: 'center',
-                        backgroundColor: s.bg, border: `1.5px solid ${s.border}` }}>
-                        <div style={{ fontSize: '26px', fontWeight: 900, color: s.color }}>{s.value}</div>
-                        <div style={{ fontSize: '11px', fontWeight: 600, color: RC.textMid, marginTop: '3px' }}>{s.label}</div>
-                    </div>
-                ))}
-            </div>
-
-            {/* Filter */}
-            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '16px' }}>
-                {['ALL', 'DELIVERED', 'REJECTED', 'CANCELLED'].map((f) => (
-                    <button key={f} onClick={() => setFilter(f)}
-                        style={{ padding: '5px 14px', borderRadius: '20px', fontSize: '12px', fontWeight: 700,
-                            border: '1.5px solid', cursor: 'pointer',
-                            backgroundColor: filter === f ? RC.crimson : '#fff',
-                            color: filter === f ? '#fff' : RC.crimson,
-                            borderColor: filter === f ? RC.crimsonDark : RC.crimsonLight }}>
-                        {f}
+                  )}
+                  {r.status === 'ACCEPTED' && (
+                    <button onClick={() => openAssign(r.id)}
+                      style={{
+                        marginTop: '10px', width: '100%', padding: '8px', borderRadius: '9px',
+                        fontWeight: 700, fontSize: '13px', backgroundColor: '#EDE7F6', color: '#512DA8',
+                        border: '1.5px solid #B39DDB', cursor: 'pointer',
+                      }}>
+                      🏍 Assign Rider
                     </button>
-                ))}
-            </div>
-
-            {loading ? (
-                <div style={{ textAlign: 'center', padding: '40px', color: RC.textMuted }}>Loading history...</div>
-            ) : filtered.length === 0 ? (
-                <RCCard variant="green" style={{ padding: '30px', textAlign: 'center' }}>
-                    <p style={{ color: RC.greenDark, fontWeight: 600, margin: 0 }}>No records found.</p>
-                </RCCard>
-            ) : (
-                <RCCard variant="white" style={{ overflow: 'hidden' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
-                        <thead>
-                            <tr style={{ backgroundColor: RC.pinkBg, borderBottom: `2px solid ${RC.crimsonLight}` }}>
-                                {['#', 'Patient', 'Blood', 'Qty', 'Hospital', 'Rider', 'Urgency', 'Status'].map((h) => (
-                                    <th key={h} style={{ textAlign: 'left', padding: '10px 14px',
-                                        fontSize: '11px', fontWeight: 900, color: RC.crimson }}>{h}</th>
-                                ))}
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {filtered.map((r, i) => (
-                                <tr key={r.id} style={{ backgroundColor: i % 2 === 0 ? '#fff' : RC.pinkSoft,
-                                    borderBottom: '1px solid #F5E0E8' }}>
-                                    <td style={{ padding: '10px 14px', color: RC.textMuted, fontSize: '11px' }}>#{r.id}</td>
-                                    <td style={{ padding: '10px 14px', fontWeight: 600, color: RC.textDark }}>{r.patientName}</td>
-                                    <td style={{ padding: '10px 14px', fontWeight: 900, color: RC.crimson }}>{r.bloodGroup}</td>
-                                    <td style={{ padding: '10px 14px', color: RC.textMid }}>{r.quantity}</td>
-                                    <td style={{ padding: '10px 14px', color: RC.textMid, maxWidth: '110px',
-                                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                        {r.hospitalName || '—'}
-                                    </td>
-                                    <td style={{ padding: '10px 14px', color: RC.textMid }}>{r.riderName || '—'}</td>
-                                    <td style={{ padding: '10px 14px' }}>
-                                        {r.urgency === 'URGENT'
-                                            ? <span style={{ fontSize: '11px', fontWeight: 700, padding: '2px 8px',
-                                                borderRadius: '20px', backgroundColor: RC.pinkBg, color: RC.crimson }}>🚨 Urgent</span>
-                                            : <span style={{ fontSize: '11px', color: RC.textMuted }}>Normal</span>}
-                                    </td>
-                                    <td style={{ padding: '10px 14px' }}>
-                                        <span style={{ fontSize: '11px', fontWeight: 700, padding: '3px 9px',
-                                            borderRadius: '20px',
-                                            backgroundColor: r.status === 'DELIVERED' ? RC.greenLight : r.status === 'REJECTED' ? RC.pinkBg : RC.cardYellow,
-                                            color: r.status === 'DELIVERED' ? RC.greenDark : r.status === 'REJECTED' ? RC.crimson : '#E65100' }}>
-                                            {r.status}
-                                        </span>
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </RCCard>
-            )}
-        </div>
-    );
-}
-
-/* ── Reports Tab ──────────────────────────────────────────────── */
-function ReportsTab({ onToast }) {
-    const [inventory, setInventory] = useState([]);
-    const [history, setHistory]     = useState([]);
-    const [loading, setLoading]     = useState(true);
-
-    useEffect(() => {
-        Promise.all([
-            apiFetch('/inventory/my').catch(() => []),
-            apiFetch('/requests/blood-bank/history').catch(() => []),
-        ])
-            .then(([inv, hist]) => { setInventory(inv || []); setHistory(hist || []); })
-            .catch((e) => onToast('Failed to load reports: ' + e.message, 'error'))
-            .finally(() => setLoading(false));
-    }, [onToast]);
-
-    if (loading) return <div style={{ textAlign: 'center', padding: '60px', color: RC.textMuted }}>Loading reports...</div>;
-
-    // Blood group breakdown from inventory
-    const bgTotals = {};
-    inventory.forEach((inv) => {
-        bgTotals[inv.bloodGroup] = (bgTotals[inv.bloodGroup] || 0) + inv.quantity;
-    });
-
-    // Category breakdown
-    const catTotals = {};
-    inventory.forEach((inv) => {
-        catTotals[inv.category] = (catTotals[inv.category] || 0) + inv.quantity;
-    });
-
-    // Expiry alerts
-    const today = new Date();
-    const expiringSoon = inventory.filter((inv) => {
-        if (!inv.expiryDate) return false;
-        const exp = new Date(inv.expiryDate);
-        const daysLeft = (exp - today) / (1000 * 60 * 60 * 24);
-        return daysLeft >= 0 && daysLeft <= 7;
-    });
-    const expired = inventory.filter((inv) => inv.expiryDate && new Date(inv.expiryDate) < today);
-
-    const totalUnits = inventory.reduce((s, inv) => s + inv.quantity, 0);
-    const delivered  = history.filter((r) => r.status === 'DELIVERED').length;
-    const rejected   = history.filter((r) => r.status === 'REJECTED').length;
-    const fulfilRate = history.length > 0 ? ((delivered / history.length) * 100).toFixed(1) : 0;
-
-    const BG_COLORS = { 'A+':'#E53935','A-':'#C62828','B+':'#1E88E5','B-':'#1565C0',
-                        'AB+':'#7B1FA2','AB-':'#4A148C','O+':'#2E7D32','O-':'#1B5E20' };
-    const maxBG = Math.max(...Object.values(bgTotals), 1);
-
-    return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-            {/* KPI row */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '12px' }}>
-                {[
-                    { label: 'Total Units in Stock', value: totalUnits,    bg: RC.cardBlue,   color: '#1565C0', border: '#90CAF9' },
-                    { label: 'Requests Fulfilled',   value: delivered,     bg: RC.greenLight, color: RC.greenDark, border: RC.greenMid },
-                    { label: 'Fulfilment Rate',      value: `${fulfilRate}%`, bg: RC.cardYellow, color: '#E65100', border: '#FFD54F' },
-                    { label: 'Expiring in 7 Days',   value: expiringSoon.length, bg: RC.pinkBg, color: RC.crimson, border: RC.crimsonLight },
-                ].map((k) => (
-                    <div key={k.label} style={{ borderRadius: '12px', padding: '16px', textAlign: 'center',
-                        backgroundColor: k.bg, border: `2px solid ${k.border}` }}>
-                        <div style={{ fontSize: '28px', fontWeight: 900, color: k.color }}>{k.value}</div>
-                        <div style={{ fontSize: '11px', fontWeight: 600, color: RC.textMid, marginTop: '3px' }}>{k.label}</div>
-                    </div>
-                ))}
-            </div>
-
-            {/* Expiry alerts */}
-            {(expired.length > 0 || expiringSoon.length > 0) && (
-                <RCCard variant="pink" style={{ padding: '16px', border: `2px solid ${RC.crimson}` }}>
-                    <p style={{ margin: '0 0 10px', fontWeight: 900, color: RC.crimson, fontSize: '13px' }}>
-                        ⚠️ Inventory Alerts
-                    </p>
-                    {expired.length > 0 && (
-                        <p style={{ margin: '0 0 6px', fontSize: '12px', color: RC.crimson, fontWeight: 700 }}>
-                            🗑 {expired.length} batch(es) have <strong>expired</strong> — remove from stock immediately.
-                        </p>
-                    )}
-                    {expiringSoon.length > 0 && (
-                        <p style={{ margin: 0, fontSize: '12px', color: '#E65100', fontWeight: 600 }}>
-                            ⏰ {expiringSoon.length} batch(es) expiring within 7 days — prioritise dispatch.
-                        </p>
-                    )}
-                </RCCard>
-            )}
-
-            {/* Blood group stock chart */}
-            <RCCard variant="white" style={{ padding: '18px' }}>
-                <p style={{ margin: '0 0 14px', fontWeight: 900, fontSize: '13px', color: RC.textMid }}>
-                    CURRENT STOCK BY BLOOD GROUP
-                </p>
-                {Object.keys(bgTotals).length === 0 ? (
-                    <p style={{ color: RC.textMuted, fontSize: '13px' }}>No inventory data available.</p>
-                ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                        {Object.entries(bgTotals).sort((a, b) => b[1] - a[1]).map(([bg, qty]) => (
-                            <div key={bg} style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                                <span style={{ fontWeight: 900, fontSize: '13px', color: BG_COLORS[bg] || RC.crimson,
-                                    minWidth: '36px', textAlign: 'right' }}>{bg}</span>
-                                <div style={{ flex: 1, height: '22px', backgroundColor: '#F5F5F5', borderRadius: '11px', overflow: 'hidden' }}>
-                                    <div style={{ width: `${(qty / maxBG) * 100}%`, height: '100%',
-                                        backgroundColor: BG_COLORS[bg] || RC.crimson, borderRadius: '11px',
-                                        transition: 'width 0.5s', minWidth: '4px' }} />
-                                </div>
-                                <span style={{ fontWeight: 700, fontSize: '13px', color: RC.textDark, minWidth: '40px' }}>
-                                    {qty} u
-                                </span>
-                            </div>
-                        ))}
-                    </div>
-                )}
-            </RCCard>
-
-            {/* Category breakdown */}
-            <RCCard variant="white" style={{ padding: '18px' }}>
-                <p style={{ margin: '0 0 14px', fontWeight: 900, fontSize: '13px', color: RC.textMid }}>
-                    STOCK BY CATEGORY (Whole Blood · PCV · FFP · SDP · Platelets)
-                </p>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
-                    {Object.entries(catTotals).map(([cat, qty]) => (
-                        <div key={cat} style={{ padding: '10px 16px', borderRadius: '10px',
-                            backgroundColor: RC.cardBlue, border: '1.5px solid #90CAF9', textAlign: 'center' }}>
-                            <div style={{ fontSize: '20px', fontWeight: 900, color: '#1565C0' }}>{qty}</div>
-                            <div style={{ fontSize: '11px', fontWeight: 600, color: RC.textMid }}>{cat}</div>
-                        </div>
-                    ))}
+                  )}
                 </div>
-            </RCCard>
-
-            {/* Supply summary */}
-            <RCCard variant="white" style={{ padding: '18px' }}>
-                <p style={{ margin: '0 0 14px', fontWeight: 900, fontSize: '13px', color: RC.textMid }}>
-                    REQUEST FULFILMENT SUMMARY
-                </p>
-                <div style={{ display: 'flex', gap: '14px', flexWrap: 'wrap' }}>
-                    {[
-                        { label: 'Total Requests Handled', value: history.length, color: RC.textDark },
-                        { label: 'Delivered',  value: delivered, color: RC.greenDark },
-                        { label: 'Rejected',   value: rejected,  color: RC.crimson },
-                        { label: 'Cancelled',  value: history.filter((r) => r.status === 'CANCELLED').length, color: '#888' },
-                    ].map((s) => (
-                        <div key={s.label} style={{ padding: '12px 16px', borderRadius: '10px',
-                            backgroundColor: RC.pinkSoft, border: `1px solid ${RC.crimsonLight}`, minWidth: '130px' }}>
-                            <div style={{ fontSize: '22px', fontWeight: 900, color: s.color }}>{s.value}</div>
-                            <div style={{ fontSize: '11px', color: RC.textMuted, marginTop: '2px' }}>{s.label}</div>
-                        </div>
-                    ))}
-                </div>
-            </RCCard>
+              </RCCard>
+            ))}
         </div>
-    );
-}
+      )}
 
-export default function BloodBankDashboard({ onLogout }) {
-    const [tab, setTab] = useState('requests');
-    const [toast, setToast] = useState(null);
-    const entityName = localStorage.getItem('entityName') || 'Blood Bank';
-    const showToast = useCallback((msg, type = 'success') => setToast({ msg, type }), []);
-
-    return (
-        <div style={{ display: 'flex', minHeight: '100vh', backgroundColor: RC.pinkSoft }}>
-            {toast && <RCToast {...toast} onClose={() => setToast(null)} />}
-            <RCSidebar
-                role="BLOOD_BANK"
-                entityName={entityName}
-                tabs={TABS}
-                activeTab={tab}
-                onTabChange={setTab}
-                onLogout={onLogout}
+      {/* Reject Modal */}
+      {rejectId && (
+        <Modal title="Reject Request" onClose={() => { setRejectId(null); setRejectReason(''); setCustomRejectReason(''); }}>
+          <p style={{ fontSize: '13px', color: RC.textMid, marginBottom: '14px' }}>
+            Please select a reason so the hospital can be informed and find an alternative.
+          </p>
+          <label style={{ fontSize: '11px', fontWeight: 700, color: RC.textMid, display: 'block', marginBottom: '5px' }}>
+            Reason for rejection
+          </label>
+          <select value={rejectReason} onChange={e => { setRejectReason(e.target.value); setCustomRejectReason(''); }}
+            style={{ ...SI(false), marginBottom: '10px' }}>
+            <option value="">Select a reason…</option>
+            <option value="Insufficient stock">Insufficient stock</option>
+            <option value="Requested blood group not available">Blood group not available</option>
+            <option value="Component type not available">Component type not available</option>
+            <option value="Blood bank at capacity">Blood bank at capacity</option>
+            <option value="Invalid request details">Invalid request details</option>
+            <option value="Other">Other (specify below)</option>
+          </select>
+          {rejectReason === 'Other' && (
+            <textarea
+              rows={3}
+              placeholder="Describe the reason…"
+              value={customRejectReason}
+              onChange={e => setCustomRejectReason(e.target.value)}
+              style={{ ...SI(false), resize: 'none', marginBottom: '12px' }}
             />
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-                <PageHeader
-                    title={`${TABS.find((t) => t.key === tab)?.icon} ${TABS.find((t) => t.key === tab)?.label}`}
-                />
-                <main style={{ flex: 1, padding: '24px 28px', overflowY: 'auto' }}>
-                    {tab === 'requests'  && <RequestsTab onToast={showToast} />}
-                    {tab === 'inventory' && <InventoryTab onToast={showToast} />}
-                    {tab === 'donors'    && <DonorsTab onToast={showToast} />}
-                    {tab === 'camps'     && <CampsTab onToast={showToast} />}
-                    {tab === 'history'   && <HistoryTab onToast={showToast} />}
-                    {tab === 'reports'   && <ReportsTab onToast={showToast} />}
-                </main>
+          )}
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button onClick={() => { setRejectId(null); setRejectReason(''); setCustomRejectReason(''); }}
+              style={{ flex: 1, padding: '9px', borderRadius: '9px', fontWeight: 700, fontSize: '13px', backgroundColor: '#F5F5F5', color: RC.textMid, border: 'none', cursor: 'pointer' }}>
+              Cancel
+            </button>
+            <button
+              onClick={reject}
+              disabled={!(rejectReason === 'Other' ? customRejectReason.trim() : rejectReason.trim()) || actionId === rejectId}
+              style={{
+                flex: 1, padding: '9px', borderRadius: '9px', fontWeight: 700, fontSize: '13px',
+                backgroundColor: RC.crimson, color: '#fff', border: 'none',
+                cursor: !(rejectReason === 'Other' ? customRejectReason.trim() : rejectReason.trim()) ? 'not-allowed' : 'pointer',
+                opacity: !(rejectReason === 'Other' ? customRejectReason.trim() : rejectReason.trim()) ? 0.5 : 1,
+              }}>
+              {actionId === rejectId ? '⏳ Rejecting…' : 'Confirm Reject'}
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {/* Assign Rider Modal */}
+      {assignId && (
+        <Modal title="Assign Rider" onClose={() => { setAssignId(null); setRiderId(''); }}>
+          <p style={{ fontSize: '13px', color: RC.textMid, marginBottom: '14px' }}>
+            Select an available rider to pick up and deliver this blood request.
+          </p>
+          {riders.length === 0 ? (
+            <div style={{ padding: '20px', textAlign: 'center', color: RC.textMuted, backgroundColor: '#F9F9F9', borderRadius: '10px', marginBottom: '14px' }}>
+              No available riders right now.
             </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '14px' }}>
+              {riders.map(r => (
+                <label key={r.id} style={{
+                  display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px',
+                  borderRadius: '10px', cursor: r.available ? 'pointer' : 'default',
+                  border: `1.5px solid ${riderId == r.id ? RC.crimson : RC.border}`,
+                  backgroundColor: riderId == r.id ? RC.pinkBg : r.available ? '#fff' : '#F9F9F9',
+                  opacity: r.available ? 1 : 0.5,
+                }}>
+                  <input type="radio" name="rider" value={r.id} checked={riderId == r.id}
+                    onChange={() => r.available && setRiderId(String(r.id))}
+                    disabled={!r.available}
+                    style={{ accentColor: RC.crimson }} />
+                  <div style={{ flex: 1 }}>
+                    <p style={{ margin: 0, fontWeight: 700, fontSize: '13px', color: RC.textDark }}>
+                      {r.name}
+                    </p>
+                    <p style={{ margin: '2px 0 0', fontSize: '11px', color: RC.textMuted }}>
+                      {r.vehicleType || 'Vehicle'} · {r.assignedZone || 'No zone'}
+                      {r.activeTasks > 0 && ` · ${r.activeTasks} active task(s)`}
+                    </p>
+                  </div>
+                  <span style={{
+                    fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '10px',
+                    backgroundColor: r.available ? RC.greenLight : '#F5F5F5',
+                    color: r.available ? RC.greenDark : RC.textMuted,
+                    border: `1px solid ${r.available ? RC.greenMid : '#E0E0E0'}`,
+                  }}>
+                    {r.available ? '🟢 Free' : '🔴 Busy'}
+                  </span>
+                </label>
+              ))}
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button onClick={() => { setAssignId(null); setRiderId(''); }}
+              style={{ flex: 1, padding: '9px', borderRadius: '9px', fontWeight: 700, fontSize: '13px', backgroundColor: '#F5F5F5', color: RC.textMid, border: 'none', cursor: 'pointer' }}>
+              Cancel
+            </button>
+            <button onClick={assign} disabled={!riderId || actionId === assignId}
+              style={{
+                flex: 1, padding: '9px', borderRadius: '9px', fontWeight: 700, fontSize: '13px',
+                backgroundColor: riderId ? '#512DA8' : '#C0C0C0', color: '#fff', border: 'none',
+                cursor: riderId ? 'pointer' : 'not-allowed',
+              }}>
+              {actionId === assignId ? '⏳ Assigning…' : '🏍 Assign'}
+            </button>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+/* ── Inventory Tab ────────────────────────────────────────────────────────── */
+function InventoryTab({ onToast }) {
+  const [inv,     setInv]     = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [form,    setForm]    = useState({ bloodGroup: '', category: 'Whole Blood', quantity: '', collectionDate: '', expiryDate: '', unitId: '', volumeMl: '', lowStockThreshold: 5 });
+  const [editId,  setEditId]  = useState(null);
+  const [saving,  setSaving]  = useState(false);
+  const [showAdd, setShowAdd] = useState(false);
+
+  const load = useCallback(async () => {
+    try { setInv(await apiFetch('/inventory/my') || []); }
+    catch { setInv([]); } finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const save = async () => {
+    if (!form.bloodGroup || !form.quantity) { onToast('Blood group and quantity are required.', 'error'); return; }
+    setSaving(true);
+    try {
+      const body = {
+        bloodGroup:        form.bloodGroup,
+        category:          form.category || null,
+        quantity:          +form.quantity,
+        collectionDate:    form.collectionDate || null,
+        expiryDate:        form.expiryDate     || null,
+        unitId:            form.unitId         || null,
+        volumeMl:          form.volumeMl ? +form.volumeMl : null,
+        lowStockThreshold: form.lowStockThreshold ? +form.lowStockThreshold : 5,
+      };
+      if (editId) {
+        await apiFetch(`/inventory/${editId}`, { method: 'PUT', body: JSON.stringify(body) });
+        onToast('✅ Inventory updated.');
+      } else {
+        await apiFetch('/inventory', { method: 'POST', body: JSON.stringify(body) });
+        onToast('✅ Blood unit added.');
+      }
+      setForm({ bloodGroup: '', category: 'Whole Blood', quantity: '', collectionDate: '', expiryDate: '', unitId: '', volumeMl: '', lowStockThreshold: 5 });
+      setEditId(null); setShowAdd(false); load();
+    } catch (e) { onToast('❌ ' + e.message, 'error'); } finally { setSaving(false); }
+  };
+
+  const del = async (id) => {
+    if (!window.confirm('Delete this inventory record?')) return;
+    try { await apiFetch(`/inventory/${id}`, { method: 'DELETE' }); onToast('Deleted.'); load(); }
+    catch (e) { onToast('❌ ' + e.message, 'error'); }
+  };
+
+  const startEdit = (item) => {
+    setEditId(item.id);
+    setForm({
+      bloodGroup: item.bloodGroup || '', category: item.category || 'Whole Blood',
+      quantity: item.quantity ?? '', collectionDate: item.collectionDate || '',
+      expiryDate: item.expiryDate || '', unitId: item.unitId || '',
+      volumeMl: item.volumeMl || '', lowStockThreshold: item.lowStockThreshold || 5,
+    });
+    setShowAdd(true);
+  };
+
+  // Aggregate totals per blood group
+  const totals = BG_LIST.map(bg => ({
+    bg,
+    qty: inv.filter(i => i.bloodGroup === bg).reduce((s, i) => s + (i.quantity || 0), 0),
+  }));
+
+  const isExpiring = (d) => { if (!d) return false; const diff = (new Date(d) - Date.now()) / 86400000; return diff >= 0 && diff <= 7; };
+  const isExpired  = (d) => d && new Date(d) < new Date();
+
+  return (
+    <div>
+      {/* Stock overview grid */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px', marginBottom: '24px' }}>
+        {totals.map(({ bg, qty }) => (
+          <div key={bg} style={{
+            borderRadius: '12px', padding: '14px 12px', textAlign: 'center',
+            backgroundColor: qty > 0 ? RC.greenLight : RC.pinkBg,
+            border: `1.5px solid ${qty > 0 ? RC.greenMid : RC.crimsonLight}`,
+          }}>
+            <div style={{ fontSize: '22px', fontWeight: 900, color: qty > 0 ? RC.greenDark : RC.crimson }}>{qty}</div>
+            <div style={{ fontSize: '13px', fontWeight: 800, color: RC.textDark }}>{bg}</div>
+            <div style={{ fontSize: '10px', color: RC.textMuted, marginTop: '2px' }}>units</div>
+          </div>
+        ))}
+      </div>
+
+      <SectionHeader
+        title="Inventory Records"
+        subtitle={`${inv.length} record${inv.length !== 1 ? 's' : ''}`}
+        action={
+          <button onClick={() => { setShowAdd(true); setEditId(null); setForm({ bloodGroup:'', category:'Whole Blood', quantity:'', collectionDate:'', expiryDate:'', unitId:'', volumeMl:'', lowStockThreshold:5 }); }}
+            style={{ padding: '8px 18px', borderRadius: '9px', fontWeight: 700, fontSize: '13px', backgroundColor: RC.crimson, color: '#fff', border: 'none', cursor: 'pointer' }}>
+            + Add Units
+          </button>
+        }
+      />
+
+      {loading ? (
+        <div style={{ textAlign: 'center', padding: '40px', color: RC.textMuted }}>⏳ Loading…</div>
+      ) : inv.length === 0 ? (
+        <RCCard variant="pink" style={{ padding: '40px', textAlign: 'center' }}>
+          <p style={{ fontSize: '32px', margin: '0 0 8px' }}>🧪</p>
+          <p style={{ fontWeight: 700, color: RC.crimson, margin: 0 }}>No inventory yet. Add blood units to get started.</p>
+        </RCCard>
+      ) : (
+        <RCCard variant="white" style={{ overflow: 'hidden' }}>
+          <table className="rc-table">
+            <thead>
+              <tr>
+                {['Unit ID', 'Group', 'Component', 'Qty', 'Collected', 'Expires', 'Status', 'Actions'].map(h => (
+                  <th key={h}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {inv.map(item => {
+                const expired  = isExpired(item.expiryDate);
+                const expiring = !expired && isExpiring(item.expiryDate);
+                return (
+                  <tr key={item.id}>
+                    <td style={{ fontSize: '11px', color: RC.textMuted, fontFamily: 'monospace' }}>{item.unitId || `#${item.id}`}</td>
+                    <td><strong style={{ color: RC.crimson }}>{item.bloodGroup}</strong></td>
+                    <td style={{ color: RC.textMid }}>{item.category || '—'}</td>
+                    <td><strong>{item.quantity}</strong></td>
+                    <td style={{ color: RC.textMuted, fontSize: '12px' }}>{item.collectionDate || '—'}</td>
+                    <td style={{ color: expired ? RC.crimson : expiring ? '#E65100' : RC.textMuted, fontWeight: (expired || expiring) ? 700 : 400, fontSize: '12px' }}>
+                      {item.expiryDate || '—'}
+                      {expiring && <span style={{ marginLeft: '4px', fontSize: '10px' }}>⚠ Soon</span>}
+                      {expired  && <span style={{ marginLeft: '4px', fontSize: '10px' }}>🚫 Expired</span>}
+                    </td>
+                    <td>
+                      <span style={{ fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '10px',
+                        backgroundColor: expired ? RC.pinkBg : item.quantity <= (item.lowStockThreshold || 5) && item.quantity > 0 ? RC.cardYellow : RC.greenLight,
+                        color: expired ? RC.crimson : item.quantity <= (item.lowStockThreshold || 5) && item.quantity > 0 ? '#E65100' : RC.greenDark,
+                      }}>
+                        {expired ? 'Expired' : item.quantity === 0 ? 'Empty' : item.quantity <= (item.lowStockThreshold || 5) ? 'Low' : 'OK'}
+                      </span>
+                    </td>
+                    <td>
+                      <div style={{ display: 'flex', gap: '6px' }}>
+                        <button onClick={() => startEdit(item)}
+                          style={{ padding: '4px 10px', borderRadius: '6px', fontSize: '11px', fontWeight: 700, backgroundColor: '#EDE7F6', color: '#512DA8', border: 'none', cursor: 'pointer' }}>
+                          Edit
+                        </button>
+                        <button onClick={() => del(item.id)}
+                          style={{ padding: '4px 10px', borderRadius: '6px', fontSize: '11px', fontWeight: 700, backgroundColor: RC.pinkBg, color: RC.crimson, border: 'none', cursor: 'pointer' }}>
+                          Delete
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </RCCard>
+      )}
+
+      {/* Add/Edit Modal */}
+      {showAdd && (
+        <Modal title={editId ? 'Edit Inventory Record' : 'Add Blood Units'}
+          onClose={() => { setShowAdd(false); setEditId(null); }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '12px' }}>
+            <div>
+              <label style={{ fontSize: '11px', fontWeight: 700, color: RC.textMid, display: 'block', marginBottom: '5px' }}>Blood Group *</label>
+              <select value={form.bloodGroup} onChange={e => setForm(f => ({ ...f, bloodGroup: e.target.value }))} style={SI(!form.bloodGroup)}>
+                <option value="">Select</option>
+                {BG_LIST.map(g => <option key={g}>{g}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={{ fontSize: '11px', fontWeight: 700, color: RC.textMid, display: 'block', marginBottom: '5px' }}>Component *</label>
+              <select value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))} style={SI(false)}>
+                {COMPONENTS.map(c => <option key={c}>{c}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={{ fontSize: '11px', fontWeight: 700, color: RC.textMid, display: 'block', marginBottom: '5px' }}>Quantity *</label>
+              <input type="number" min="0" value={form.quantity} onChange={e => setForm(f => ({ ...f, quantity: e.target.value }))} placeholder="Units" style={SI(!form.quantity)} />
+            </div>
+            <div>
+              <label style={{ fontSize: '11px', fontWeight: 700, color: RC.textMid, display: 'block', marginBottom: '5px' }}>Volume (ml)</label>
+              <input type="number" min="1" value={form.volumeMl} onChange={e => setForm(f => ({ ...f, volumeMl: e.target.value }))} placeholder="e.g. 350" style={SI(false)} />
+            </div>
+            <div>
+              <label style={{ fontSize: '11px', fontWeight: 700, color: RC.textMid, display: 'block', marginBottom: '5px' }}>Collection Date</label>
+              <input type="date" value={form.collectionDate} onChange={e => setForm(f => ({ ...f, collectionDate: e.target.value }))} style={SI(false)} />
+            </div>
+            <div>
+              <label style={{ fontSize: '11px', fontWeight: 700, color: RC.textMid, display: 'block', marginBottom: '5px' }}>Expiry Date</label>
+              <input type="date" value={form.expiryDate} onChange={e => setForm(f => ({ ...f, expiryDate: e.target.value }))} style={SI(false)} />
+            </div>
+            <div>
+              <label style={{ fontSize: '11px', fontWeight: 700, color: RC.textMid, display: 'block', marginBottom: '5px' }}>Unit ID / Barcode</label>
+              <input value={form.unitId} onChange={e => setForm(f => ({ ...f, unitId: e.target.value }))} placeholder="Optional" style={SI(false)} />
+            </div>
+            <div>
+              <label style={{ fontSize: '11px', fontWeight: 700, color: RC.textMid, display: 'block', marginBottom: '5px' }}>Low Stock Alert Threshold</label>
+              <input type="number" min="1" value={form.lowStockThreshold} onChange={e => setForm(f => ({ ...f, lowStockThreshold: e.target.value }))} style={SI(false)} />
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button onClick={() => { setShowAdd(false); setEditId(null); }}
+              style={{ flex: 1, padding: '9px', borderRadius: '9px', fontWeight: 700, fontSize: '13px', backgroundColor: '#F5F5F5', color: RC.textMid, border: 'none', cursor: 'pointer' }}>
+              Cancel
+            </button>
+            <button onClick={save} disabled={saving}
+              style={{ flex: 1, padding: '9px', borderRadius: '9px', fontWeight: 700, fontSize: '13px', backgroundColor: RC.crimson, color: '#fff', border: 'none', cursor: saving ? 'not-allowed' : 'pointer', opacity: saving ? 0.7 : 1 }}>
+              {saving ? '⏳ Saving…' : editId ? 'Update' : 'Add Units'}
+            </button>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+/* ── Donors Tab ───────────────────────────────────────────────────────────── */
+function DonorsTab({ onToast }) {
+  const [donors,  setDonors]  = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [search,  setSearch]  = useState('');
+
+  useEffect(() => {
+    apiFetch('/donors/my').then(d => setDonors(d || [])).catch(() => setDonors([])).finally(() => setLoading(false));
+  }, []);
+
+  const filtered = donors.filter(d =>
+    !search || d.name?.toLowerCase().includes(search.toLowerCase()) ||
+    d.bloodGroup?.includes(search) || d.phone?.includes(search)
+  );
+
+  return (
+    <div>
+      <SectionHeader title="Donor Registry" subtitle={`${donors.length} registered donors`} />
+      <div style={{ marginBottom: '16px' }}>
+        <input value={search} onChange={e => setSearch(e.target.value)}
+          placeholder="🔍 Search by name, blood group, or phone…"
+          style={{ ...SI(false), maxWidth: '360px' }} />
+      </div>
+      {loading ? (
+        <div style={{ textAlign: 'center', padding: '40px', color: RC.textMuted }}>⏳ Loading…</div>
+      ) : filtered.length === 0 ? (
+        <RCCard variant="green" style={{ padding: '40px', textAlign: 'center' }}>
+          <p style={{ fontWeight: 700, color: RC.greenDark, margin: 0 }}>
+            {search ? 'No donors match your search.' : 'No donors registered yet.'}
+          </p>
+        </RCCard>
+      ) : (
+        <RCCard variant="white" style={{ overflow: 'hidden' }}>
+          <table className="rc-table">
+            <thead>
+              <tr>{['Name','Blood Group','Phone','Last Donation','Donations','Eligible'].map(h => <th key={h}>{h}</th>)}</tr>
+            </thead>
+            <tbody>
+              {filtered.map((d, i) => {
+                const eligible = !d.lastDonation || (Date.now() - new Date(d.lastDonation)) / 86400000 >= 56;
+                return (
+                  <tr key={d.id}>
+                    <td style={{ fontWeight: 600, color: RC.textDark }}>{d.name}</td>
+                    <td><strong style={{ color: RC.crimson }}>{d.bloodGroup}</strong></td>
+                    <td style={{ color: RC.textMid }}>{d.phone}</td>
+                    <td style={{ fontSize: '12px', color: RC.textMuted }}>{d.lastDonation || '—'}</td>
+                    <td style={{ fontWeight: 700, color: RC.textDark }}>{d.donationCount || 0}</td>
+                    <td>
+                      <span style={{
+                        fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '10px',
+                        backgroundColor: eligible ? RC.greenLight : RC.pinkBg,
+                        color: eligible ? RC.greenDark : RC.crimson,
+                      }}>
+                        {eligible ? '✅ Yes' : '⏳ Not yet'}
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </RCCard>
+      )}
+    </div>
+  );
+}
+
+/* ── Camps Tab ────────────────────────────────────────────────────────────── */
+function CampsTab({ onToast }) {
+  const [camps,   setCamps]   = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    apiFetch('/camps/my').then(d => setCamps(d || [])).catch(() => setCamps([])).finally(() => setLoading(false));
+  }, []);
+
+  return (
+    <div>
+      <SectionHeader title="Blood Donation Camps" subtitle={`${camps.length} camp${camps.length !== 1 ? 's' : ''} organised`} />
+      {loading ? (
+        <div style={{ textAlign: 'center', padding: '40px', color: RC.textMuted }}>⏳ Loading…</div>
+      ) : camps.length === 0 ? (
+        <RCCard variant="pink" style={{ padding: '48px', textAlign: 'center' }}>
+          <p style={{ fontSize: '36px', margin: '0 0 10px' }}>🏕</p>
+          <p style={{ fontWeight: 700, color: RC.crimson, margin: 0 }}>No camps yet. Blood camps will appear here once created by admin.</p>
+        </RCCard>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(280px,1fr))', gap: '14px' }}>
+          {camps.map(c => (
+            <RCCard key={c.id} variant="pink">
+              <div style={{ padding: '16px' }}>
+                <p style={{ margin: '0 0 4px', fontWeight: 800, fontSize: '15px', color: RC.crimson }}>{c.name}</p>
+                <p style={{ margin: '0 0 6px', fontSize: '12px', color: RC.textMid }}>📍 {c.location}</p>
+                <p style={{ margin: '0 0 6px', fontSize: '12px', color: RC.textMuted }}>📅 {c.date} {c.time}</p>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '12px', color: RC.greenDark, fontWeight: 700 }}>
+                    🩸 {c.unitsCollected || 0} / {c.targetUnits || '?'} units
+                  </span>
+                  <span style={{
+                    fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '10px',
+                    backgroundColor: c.status === 'ACTIVE' ? RC.greenLight : '#F5F5F5',
+                    color: c.status === 'ACTIVE' ? RC.greenDark : RC.textMuted,
+                  }}>{c.status || 'Upcoming'}</span>
+                </div>
+              </div>
+            </RCCard>
+          ))}
         </div>
-    );
+      )}
+    </div>
+  );
+}
+
+/* ── Reports Tab ──────────────────────────────────────────────────────────── */
+function ReportsTab() {
+  const [stats, setStats] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    apiFetch('/requests/bank/stats').then(d => setStats(d)).catch(() => setStats(null)).finally(() => setLoading(false));
+  }, []);
+
+  if (loading) return <div style={{ textAlign: 'center', padding: '60px', color: RC.textMuted }}>⏳ Loading reports…</div>;
+  if (!stats)  return <RCCard variant="pink" style={{ padding: '32px', textAlign: 'center' }}><p style={{ color: RC.crimson, fontWeight: 700, margin: 0 }}>Reports not available.</p></RCCard>;
+
+  const kpis = [
+    { label: 'Total Requests',  value: stats.total       || 0, bg: RC.cardBlue,   c: '#1565C0', bd: '#90CAF9'    },
+    { label: 'Fulfilled',       value: stats.delivered   || 0, bg: RC.greenLight, c: RC.greenDark, bd: RC.greenMid },
+    { label: 'Rejected',        value: stats.rejected    || 0, bg: RC.pinkBg,     c: RC.crimson, bd: RC.crimsonLight },
+    { label: 'Avg Response',    value: stats.avgMinutes ? `${stats.avgMinutes}m` : '—', bg: RC.cardYellow, c: '#E65100', bd: '#FFD54F' },
+  ];
+
+  return (
+    <div>
+      <SectionHeader title="Performance Reports" subtitle="Analytics for this blood bank" />
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '12px', marginBottom: '24px' }}>
+        {kpis.map(k => (
+          <div key={k.label} style={{ borderRadius: '14px', padding: '18px', textAlign: 'center', backgroundColor: k.bg, border: `1.5px solid ${k.bd}` }}>
+            <div style={{ fontSize: '28px', fontWeight: 900, color: k.c }}>{k.value}</div>
+            <div style={{ fontSize: '11px', fontWeight: 700, color: RC.textMid, marginTop: '4px' }}>{k.label}</div>
+          </div>
+        ))}
+      </div>
+      <RCCard variant="white" style={{ padding: '24px' }}>
+        <p style={{ color: RC.textMuted, fontSize: '13px', textAlign: 'center', margin: 0 }}>
+          Detailed charts and export features coming soon. Data exports available via the Admin panel.
+        </p>
+      </RCCard>
+    </div>
+  );
+}
+
+/* ── Modal Helper ─────────────────────────────────────────────────────────── */
+function Modal({ title, onClose, children }) {
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)',
+      zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px',
+    }} onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{
+        backgroundColor: '#fff', borderRadius: '18px', padding: '24px',
+        width: '100%', maxWidth: '480px', maxHeight: '90vh', overflowY: 'auto',
+        boxShadow: '0 24px 64px rgba(0,0,0,0.25)',
+        animation: 'fade-in-up 0.25s ease-out both',
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px' }}>
+          <h3 style={{ margin: 0, fontWeight: 900, fontSize: '17px', color: RC.textDark }}>{title}</h3>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: '22px', cursor: 'pointer', color: RC.textMuted, lineHeight: 1 }}>×</button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/* ── Main Dashboard ───────────────────────────────────────────────────────── */
+export default function BloodBankDashboard({ onLogout }) {
+  const [tab,   setTab]   = useState('requests');
+  const [toast, setToast] = useState(null);
+  const entityName = localStorage.getItem('entityName') || 'Blood Bank';
+  const showToast = useCallback((msg, type = 'success') => setToast({ msg, type }), []);
+
+  return (
+    <div className="dashboard-shell">
+      {toast && <RCToast {...toast} onClose={() => setToast(null)} />}
+      <RCSidebar role="BLOOD_BANK" entityName={entityName} tabs={TABS} activeTab={tab} onTabChange={setTab} onLogout={onLogout} />
+      <div className="dashboard-main">
+        <div style={{
+          backgroundColor: '#fff', borderBottom: `2px solid ${RC.pinkSoft}`,
+          padding: '16px 32px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
+        }}>
+          <div>
+            <h2 style={{ margin: 0, fontWeight: 900, fontSize: '18px', color: RC.textDark }}>
+              {TABS.find(t => t.key === tab)?.icon} {TABS.find(t => t.key === tab)?.label}
+            </h2>
+            <p style={{ margin: '2px 0 0', fontSize: '12px', color: RC.textMuted }}>RC Foundation — Blood Management System</p>
+          </div>
+        </div>
+        <div className="dashboard-content">
+          {tab === 'requests'  && <RequestsTab  onToast={showToast} />}
+          {tab === 'inventory' && <InventoryTab onToast={showToast} />}
+          {tab === 'donors'    && <DonorsTab    onToast={showToast} />}
+          {tab === 'camps'     && <CampsTab     onToast={showToast} />}
+          {tab === 'reports'   && <ReportsTab />}
+        </div>
+      </div>
+    </div>
+  );
 }

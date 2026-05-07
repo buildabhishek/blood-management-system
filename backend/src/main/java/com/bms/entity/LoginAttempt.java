@@ -7,28 +7,24 @@ import org.hibernate.annotations.CreationTimestamp;
 
 import java.time.LocalDateTime;
 
-@Getter
-@Setter
+@Getter @Setter
 @Entity
 @Table(name = "login_attempts")
 public class LoginAttempt {
-
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(nullable = false)
+    @Column(nullable = false, unique = true)
     private String phone;
 
     @Column(nullable = false)
     private int failureCount = 0;
 
     private LocalDateTime lockedUntil;
+    private LocalDateTime lastAttemptAt;
 
     @CreationTimestamp
     private LocalDateTime createdAt;
-
-    private LocalDateTime lastAttemptAt;
 
     public boolean isLocked() {
         return lockedUntil != null && LocalDateTime.now().isBefore(lockedUntil);

@@ -1,9 +1,6 @@
 package com.bms.dto;
-
 import jakarta.validation.constraints.NotNull;
-import lombok.Getter;
-import lombok.Setter;
-
+import lombok.*;
 @Getter @Setter
 public class RiderAssignDto {
     @NotNull private Long riderId;

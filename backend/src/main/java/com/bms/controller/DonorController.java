@@ -1,55 +1,51 @@
 package com.bms.controller;
 
-import com.bms.entity.Donor;
-import com.bms.service.DonorService;
+import com.bms.entity.*;
+import com.bms.repository.*;
+import com.bms.service.*;
 import jakarta.validation.Valid;
+import org.springframework.data.domain.*;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.List;
+import java.util.*;
+import java.util.stream.Collectors;
 
+// ── Donor ─────────────────────────────────────────────────────────────────────
 @RestController
 @RequestMapping("/api/donors")
-public class DonorController {
-
-    private final DonorService donorService;
-
-    public DonorController(DonorService donorService) {
-        this.donorService = donorService;
-    }
+class DonorController {
+    private final DonorService service;
+    DonorController(DonorService s) { service = s; }
 
     @PreAuthorize("hasRole('BLOOD_BANK')")
     @PostMapping
-    public ResponseEntity<Donor> add(@Valid @RequestBody Donor donor, Authentication auth) {
-        return ResponseEntity.ok(donorService.addDonor(donor, auth.getName()));
+    public ResponseEntity<Donor> add(@Valid @RequestBody Donor d, Authentication auth) {
+        return ResponseEntity.ok(service.add(d, auth.getName()));
     }
 
     @PreAuthorize("hasRole('BLOOD_BANK')")
     @GetMapping("/my")
-    public ResponseEntity<List<Donor>> getMyDonors(Authentication auth) {
-        return ResponseEntity.ok(donorService.getMyDonors(auth.getName()));
+    public ResponseEntity<List<Donor>> getMine(Authentication auth) {
+        return ResponseEntity.ok(service.getMine(auth.getName()));
     }
 
     @PreAuthorize("hasRole('ADMIN')")
     @GetMapping
-    public ResponseEntity<List<Donor>> getAll() {
-        return ResponseEntity.ok(donorService.getAll());
-    }
+    public ResponseEntity<List<Donor>> getAll() { return ResponseEntity.ok(service.getAll()); }
 
     @PreAuthorize("hasRole('BLOOD_BANK')")
     @PutMapping("/{id}")
-    public ResponseEntity<Donor> update(@PathVariable Long id,
-            @Valid @RequestBody Donor donor, Authentication auth) {
-        return ResponseEntity.ok(donorService.updateDonor(id, donor, auth.getName()));
+    public ResponseEntity<Donor> update(@PathVariable Long id, @RequestBody Donor d, Authentication auth) {
+        return ResponseEntity.ok(service.update(id, d, auth.getName()));
     }
 
-    // FIX 7: Always pass auth.getName() — DonorService now checks role internally
-    @PreAuthorize("hasAnyRole('BLOOD_BANK', 'ADMIN')")
+    @PreAuthorize("hasAnyRole('BLOOD_BANK','ADMIN')")
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> delete(@PathVariable Long id, Authentication auth) {
-        donorService.deleteDonor(id, auth.getName());
+        service.delete(id, auth.getName());
         return ResponseEntity.noContent().build();
     }
 }

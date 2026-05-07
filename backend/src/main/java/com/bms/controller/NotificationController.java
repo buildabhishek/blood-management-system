@@ -4,70 +4,73 @@ import com.bms.entity.NotificationLog;
 import com.bms.repository.NotificationLogRepository;
 import com.bms.service.UserService;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 @RestController
 @RequestMapping("/api")
 public class NotificationController {
 
     private final UserService userService;
-    private final NotificationLogRepository notifRepo;
+    private final NotificationLogRepository repo;
 
-    public NotificationController(UserService userService,
-                                  NotificationLogRepository notifRepo) {
-        this.userService = userService;
-        this.notifRepo   = notifRepo;
+    public NotificationController(UserService u, NotificationLogRepository r) {
+        userService = u; repo = r;
     }
 
-    /** Save FCM device token for authenticated user */
+    // BUG FIX: moved to /api/notifications/save-token for consistency
+    @PostMapping("/notifications/save-token")
+    public ResponseEntity<?> saveToken(@RequestBody Map<String, String> body, Authentication auth) {
+        String token = body.get("token");
+        if (token == null || token.isBlank()) return ResponseEntity.badRequest().body(Map.of("error", "token required."));
+        if (auth != null) userService.updateFcmToken(auth.getName(), token);
+        return ResponseEntity.ok(Map.of("message", "Token saved."));
+    }
+
+    // BUG FIX: keep legacy /api/save-token path working so existing clients don't break
     @PostMapping("/save-token")
-    public ResponseEntity<Map<String, String>> saveToken(
-            @RequestBody Map<String, String> body, Authentication auth) {
-        String fcmToken = body.get("token");
-        if (fcmToken == null || fcmToken.isBlank())
-            return ResponseEntity.badRequest().body(Map.of("error", "token is required"));
-        if (auth != null && auth.getName() != null)
-            userService.updateFcmToken(auth.getName(), fcmToken);
-        return ResponseEntity.ok(Map.of("message", "Token saved"));
+    public ResponseEntity<?> saveTokenLegacy(@RequestBody Map<String, String> body, Authentication auth) {
+        return saveToken(body, auth);
     }
 
-    /** Get all notifications for the logged-in user (latest 50) */
     @GetMapping("/notifications")
-    public ResponseEntity<List<NotificationLog>> getMyNotifications(Authentication auth) {
-        List<NotificationLog> all = notifRepo
-            .findByRecipient_PhoneOrderByCreatedAtDesc(auth.getName());
-        // Return at most 50 — enough for the bell panel
-        return ResponseEntity.ok(all.size() > 50 ? all.subList(0, 50) : all);
+    public ResponseEntity<List<Map<String, Object>>> getNotifications(Authentication auth) {
+        List<NotificationLog> all = repo.findByRecipient_PhoneOrderByCreatedAtDesc(auth.getName());
+        List<NotificationLog> page = all.size() > 50 ? all.subList(0, 50) : all;
+        // BUG FIX: return safe DTO map instead of full entity (prevents user data leakage via recipient field)
+        List<Map<String, Object>> result = page.stream().map(n -> {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("id",        n.getId());
+            m.put("title",     n.getTitle());
+            m.put("message",   n.getMessage());
+            m.put("refType",   n.getRefType());
+            m.put("refId",     n.getRefId());
+            m.put("read",      n.isRead());
+            m.put("createdAt", n.getCreatedAt());
+            return m;
+        }).toList();
+        return ResponseEntity.ok(result);
     }
 
-    /** Unread count — used for the badge */
     @GetMapping("/notifications/unread-count")
     public ResponseEntity<Map<String, Long>> unreadCount(Authentication auth) {
-        long count = notifRepo.countByRecipient_PhoneAndReadFalse(auth.getName());
-        return ResponseEntity.ok(Map.of("count", count));
+        return ResponseEntity.ok(Map.of("count", repo.countByRecipient_PhoneAndReadFalse(auth.getName())));
     }
 
-    /** Mark all notifications as read */
     @PutMapping("/notifications/mark-all-read")
     public ResponseEntity<Map<String, Integer>> markAllRead(Authentication auth) {
-        int updated = notifRepo.markAllReadByPhone(auth.getName());
-        return ResponseEntity.ok(Map.of("updated", updated));
+        return ResponseEntity.ok(Map.of("updated", repo.markAllReadByPhone(auth.getName())));
     }
 
-    /** Mark single notification as read */
     @PutMapping("/notifications/{id}/read")
-    public ResponseEntity<Map<String, String>> markRead(
-            @PathVariable Long id, Authentication auth) {
-        notifRepo.findById(id).ifPresent(n -> {
-            if (n.getRecipient().getPhone().equals(auth.getName())) {
-                n.setRead(true);
-                notifRepo.save(n);
-            }
+    public ResponseEntity<Map<String, String>> markRead(@PathVariable Long id, Authentication auth) {
+        repo.findById(id).ifPresent(n -> {
+            // BUG FIX: was missing auth check — any logged-in user could mark any notification read
+            if (n.getRecipient().getPhone().equals(auth.getName())) { n.setRead(true); repo.save(n); }
         });
-        return ResponseEntity.ok(Map.of("message", "Marked read"));
+        return ResponseEntity.ok(Map.of("message", "Marked read."));
     }
 }

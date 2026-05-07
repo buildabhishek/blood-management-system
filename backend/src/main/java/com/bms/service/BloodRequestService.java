@@ -2,290 +2,212 @@ package com.bms.service;
 
 import com.bms.dto.RequestDto;
 import com.bms.entity.*;
-import com.bms.repository.BloodRequestRepository;
-import com.bms.repository.UserRepository;
+import com.bms.repository.*;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.security.SecureRandom;
+import java.time.LocalDateTime;
 import java.util.*;
 
 @Service
 public class BloodRequestService {
 
-    private static final Map<RequestStatus, RequestStatus> RIDER_TRANSITIONS = Map.of(
-            RequestStatus.ASSIGNED, RequestStatus.IN_TRANSIT,
-            RequestStatus.IN_TRANSIT, RequestStatus.DELIVERED);
+    private static final List<RequestStatus> ACTIVE_RIDER_STATUSES =
+        List.of(RequestStatus.ASSIGNED, RequestStatus.IN_TRANSIT);
 
-    private final BloodRequestRepository requestRepo;
+    private static final Map<RequestStatus, RequestStatus> RIDER_FLOW = Map.of(
+        RequestStatus.ASSIGNED, RequestStatus.IN_TRANSIT,
+        RequestStatus.IN_TRANSIT, RequestStatus.DELIVERED);
+
+    private final BloodRequestRepository reqRepo;
     private final UserRepository userRepo;
-    private final BloodInventoryService inventoryService;
-    private final NotificationService notificationService;
+    private final BloodInventoryService invService;
+    private final NotificationService notifService;
     private final SecureRandom rng = new SecureRandom();
 
-    public BloodRequestService(BloodRequestRepository requestRepo, UserRepository userRepo,
-            BloodInventoryService inventoryService, NotificationService notificationService) {
-        this.requestRepo = requestRepo;
-        this.userRepo = userRepo;
-        this.inventoryService = inventoryService;
-        this.notificationService = notificationService;
-    }
-
-    // ── CREATE ────────────────────────────────────────────────────────────────
-    @Transactional
-    public BloodRequest createRequest(RequestDto dto, String hospitalPhone) {
-        Urgency urgency;
-        try {
-            urgency = Urgency.valueOf(dto.getUrgency().toUpperCase());
-        } catch (IllegalArgumentException e) {
-            throw new RuntimeException("Invalid urgency. Must be NORMAL or URGENT.");
-        }
-
-        // bloodBankId is @NotNull in DTO so this should not occur, but double-check
-        if (dto.getBloodBankId() == null)
-            throw new RuntimeException(
-                    "A blood bank must be selected from the search results before submitting a request.");
-
-        User hospital = userRepo.findByPhone(hospitalPhone)
-                .orElseThrow(() -> new RuntimeException("Hospital not found"));
-
-        User bank = userRepo.findById(dto.getBloodBankId())
-                .orElseThrow(() -> new RuntimeException("Selected blood bank not found. Please search again."));
-
-        if (bank.getRole() != Role.BLOOD_BANK)
-            throw new RuntimeException("Invalid blood bank selected.");
-
-        BloodRequest req = new BloodRequest();
-        req.setPatientName(dto.getPatientName());
-        req.setBloodGroup(dto.getBloodGroup());
-        req.setQuantity(dto.getQuantity());
-        req.setUrgency(urgency);
-        req.setNotes(dto.getNotes());
-        req.setHospital(hospital);
-        req.setBloodBank(bank);
-        req.setStatus(RequestStatus.PENDING);
-
-        // Attach receipt if provided
-        if (dto.getReceiptData() != null && !dto.getReceiptData().isBlank()) {
-            req.setReceiptData(dto.getReceiptData());
-            req.setReceiptFileName(dto.getReceiptFileName());
-            req.setReceiptMimeType(dto.getReceiptMimeType());
-        }
-
-        BloodRequest saved = requestRepo.save(req);
-
-        String hospitalDisplay = hospital.getEntityName() != null
-                ? hospital.getEntityName()
-                : hospital.getName();
-        notificationService.notifyBloodBankRequestReceived(bank, req.getBloodGroup().getLabel(), hospitalDisplay);
-
-        return saved;
+    public BloodRequestService(BloodRequestRepository reqRepo, UserRepository userRepo,
+                                BloodInventoryService invService, NotificationService notifService) {
+        this.reqRepo      = reqRepo;
+        this.userRepo     = userRepo;
+        this.invService   = invService;
+        this.notifService = notifService;
     }
 
     // ── HOSPITAL ──────────────────────────────────────────────────────────────
-    public List<BloodRequest> getHospitalRequests(String phone) {
-        return requestRepo.findByHospital_PhoneAndStatusNotIn(phone,
-                List.of(RequestStatus.DELIVERED, RequestStatus.REJECTED, RequestStatus.CANCELLED));
-    }
-
-    public List<BloodRequest> getHospitalHistory(String phone) {
-        return requestRepo.findByHospital_PhoneAndStatusIn(phone,
-                List.of(RequestStatus.DELIVERED, RequestStatus.REJECTED, RequestStatus.CANCELLED));
-    }
 
     @Transactional
-    public BloodRequest cancelRequest(Long id, String hospitalPhone) {
-        BloodRequest req = requestRepo.findByIdForUpdate(id)
-                .orElseThrow(() -> new RuntimeException("Request not found"));
+    public BloodRequest create(RequestDto dto, String hospitalPhone) {
+        Urgency urgency;
+        try { urgency = Urgency.valueOf(dto.getUrgency().toUpperCase()); }
+        catch (Exception e) { throw new RuntimeException("Invalid urgency. Use NORMAL, URGENT, or CRITICAL."); }
 
-        if (!req.getHospital().getPhone().equals(hospitalPhone))
-            throw new RuntimeException("You are not authorised to cancel this request.");
+        User hospital = userRepo.findByPhone(hospitalPhone).orElseThrow(() -> new RuntimeException("Hospital not found."));
+        User bank     = userRepo.findById(dto.getBloodBankId()).orElseThrow(() -> new RuntimeException("Blood bank not found."));
+        if (bank.getRole() != Role.BLOOD_BANK) throw new RuntimeException("Invalid blood bank selected.");
 
-        if (req.getStatus() != RequestStatus.PENDING)
-            throw new RuntimeException(
-                    "Only PENDING requests can be cancelled. This request is already " + req.getStatus() + ".");
-
-        req.setStatus(RequestStatus.CANCELLED);
-        BloodRequest saved = requestRepo.save(req);
-
-        // Notify blood bank if one was already assigned
-        if (req.getBloodBank() != null) {
-            String hospitalDisplay = req.getHospital().getEntityName() != null
-                    ? req.getHospital().getEntityName()
-                    : req.getHospital().getName();
-            notificationService.notifyHospitalRequestCancelled(
-                    req.getBloodBank(), req.getBloodGroup().getLabel(), hospitalDisplay);
+        BloodRequest r = new BloodRequest();
+        r.setPatientName(dto.getPatientName());
+        r.setPatientAge(dto.getPatientAge());
+        r.setWardBed(dto.getWardBed());
+        r.setAttendingPhysician(dto.getAttendingPhysician());
+        r.setBloodGroup(dto.getBloodGroup());
+        r.setComponentType(dto.getComponentType());
+        r.setQuantity(dto.getQuantity());
+        r.setUrgency(urgency);
+        r.setNotes(dto.getNotes());
+        r.setHospital(hospital);
+        r.setBloodBank(bank);
+        r.setStatus(RequestStatus.PENDING);
+        if (dto.getReceiptData() != null && !dto.getReceiptData().isBlank()) {
+            r.setReceiptData(dto.getReceiptData());
+            r.setReceiptFileName(dto.getReceiptFileName());
+            r.setReceiptMimeType(dto.getReceiptMimeType());
         }
+        BloodRequest saved = reqRepo.save(r);
+        notifService.notifyBloodBankNewRequest(bank, r.getBloodGroup().getLabel(),
+            hospital.getEntityName() != null ? hospital.getEntityName() : hospital.getName(), urgency);
         return saved;
     }
 
-    // ── BLOOD BANK ────────────────────────────────────────────────────────────
-    public List<BloodRequest> getBloodBankRequests(String phone) {
-        // Show only active (non-terminal) requests directed at this bank
-        List<RequestStatus> activeStatuses = List.of(
-            RequestStatus.PENDING, RequestStatus.ACCEPTED,
-            RequestStatus.ASSIGNED, RequestStatus.IN_TRANSIT);
-        List<BloodRequest> assigned = requestRepo.findByBloodBank_PhoneAndStatusIn(phone, activeStatuses);
-        List<BloodRequest> unassigned = requestRepo.findByBloodBankIsNullAndStatusIn(
-            List.of(RequestStatus.PENDING));
-        List<BloodRequest> combined = new ArrayList<>(assigned);
-        for (BloodRequest u : unassigned) {
-            if (combined.stream().noneMatch(a -> a.getId().equals(u.getId())))
-                combined.add(u);
-        }
-        return combined;
+    public List<BloodRequest> getHospitalActive(String phone) {
+        return reqRepo.findByHospital_PhoneAndStatusNotInOrderByCreatedAtDesc(phone,
+            List.of(RequestStatus.DELIVERED, RequestStatus.REJECTED, RequestStatus.CANCELLED));
     }
 
-    public List<BloodRequest> getBloodBankHistory(String phone) {
-        return requestRepo.findByBloodBank_PhoneAndStatusIn(phone,
+    public List<BloodRequest> getHospitalHistory(String phone) {
+        return reqRepo.findByHospital_PhoneAndStatusInOrderByCreatedAtDesc(phone,
             List.of(RequestStatus.DELIVERED, RequestStatus.REJECTED, RequestStatus.CANCELLED));
     }
 
     @Transactional
-    public BloodRequest updateStatus(Long id, String status, String bankPhone, String rejectionReason) {
-        BloodRequest req = requestRepo.findByIdForUpdate(id)
-                .orElseThrow(() -> new RuntimeException("Request not found"));
+    public BloodRequest cancel(Long id, String hospitalPhone) {
+        BloodRequest r = reqRepo.findByIdForUpdate(id).orElseThrow(() -> new RuntimeException("Request not found."));
+        if (!r.getHospital().getPhone().equals(hospitalPhone))
+            throw new RuntimeException("Not authorised.");
+        if (r.getStatus() != RequestStatus.PENDING)
+            throw new RuntimeException("Only PENDING requests can be cancelled.");
+        r.setStatus(RequestStatus.CANCELLED);
+        BloodRequest saved = reqRepo.save(r);
+        if (r.getBloodBank() != null)
+            notifService.notifyBloodBankCancelled(r.getBloodBank(), r.getBloodGroup().getLabel(), r.getHospitalName());
+        return saved;
+    }
 
-        if (req.getStatus() != RequestStatus.PENDING) {
-            throw new RuntimeException(
-                    "Request already processed. Current status: " + req.getStatus() +
-                            ". Please refresh the page.");
-        }
+    // ── BLOOD BANK ────────────────────────────────────────────────────────────
+
+    public List<BloodRequest> getBankActive(String phone) {
+        List<BloodRequest> mine = reqRepo.findByBloodBank_PhoneAndStatusInOrderByCreatedAtDesc(phone,
+            List.of(RequestStatus.PENDING, RequestStatus.ACCEPTED, RequestStatus.ASSIGNED, RequestStatus.IN_TRANSIT));
+        List<BloodRequest> unassigned = reqRepo.findByBloodBankIsNullAndStatusOrderByUrgencyDescCreatedAtDesc(RequestStatus.PENDING);
+        List<BloodRequest> combined = new ArrayList<>(mine);
+        unassigned.forEach(u -> { if (combined.stream().noneMatch(a -> a.getId().equals(u.getId()))) combined.add(u); });
+        return combined;
+    }
+
+    public List<BloodRequest> getBankHistory(String phone) {
+        return reqRepo.findByBloodBank_PhoneAndStatusNotInOrderByCreatedAtDesc(phone,
+            List.of(RequestStatus.PENDING, RequestStatus.ACCEPTED, RequestStatus.ASSIGNED, RequestStatus.IN_TRANSIT));
+    }
+
+    @Transactional
+    public BloodRequest updateStatus(Long id, String status, String bankPhone, String reason) {
+        BloodRequest r = reqRepo.findByIdForUpdate(id).orElseThrow(() -> new RuntimeException("Request not found."));
+        if (r.getStatus() != RequestStatus.PENDING)
+            throw new RuntimeException("Request already processed. Current status: " + r.getStatus() + ". Refresh the page.");
 
         RequestStatus newStatus;
-        try {
-            newStatus = RequestStatus.valueOf(status.toUpperCase());
-        } catch (IllegalArgumentException e) {
-            throw new RuntimeException("Invalid status: " + status);
-        }
-
+        try { newStatus = RequestStatus.valueOf(status.toUpperCase()); }
+        catch (Exception e) { throw new RuntimeException("Invalid status: " + status); }
         if (newStatus != RequestStatus.ACCEPTED && newStatus != RequestStatus.REJECTED)
             throw new RuntimeException("Blood bank may only set ACCEPTED or REJECTED.");
 
-        if (req.getBloodBank() == null) {
-            User bank = userRepo.findByPhone(bankPhone)
-                    .orElseThrow(() -> new RuntimeException("Blood bank not found"));
-            req.setBloodBank(bank);
+        if (r.getBloodBank() == null) {
+            User bank = userRepo.findByPhone(bankPhone).orElseThrow(() -> new RuntimeException("Blood bank not found."));
+            r.setBloodBank(bank);
         }
-        req.setStatus(newStatus);
-
-        String bankName = req.getBloodBank().getEntityName() != null
-                ? req.getBloodBank().getEntityName()
-                : req.getBloodBank().getName();
+        r.setStatus(newStatus);
+        String bankName = r.getBloodBank().getEntityName() != null ? r.getBloodBank().getEntityName() : r.getBloodBank().getName();
 
         if (newStatus == RequestStatus.ACCEPTED) {
-            try {
-                inventoryService.deductStockFromBank(
-                        req.getBloodBank().getId(), req.getBloodGroup(), req.getQuantity());
-            } catch (RuntimeException e) {
-                throw new RuntimeException("Cannot accept request: " + e.getMessage() +
-                        " Please update your inventory first.");
-            }
-            notificationService.notifyHospitalRequestAccepted(
-                    req.getHospital(), req.getBloodGroup().getLabel(), bankName);
+            try { invService.deductStock(r.getBloodBank().getId(), r.getBloodGroup(), r.getQuantity()); }
+            catch (RuntimeException e) { throw new RuntimeException("Cannot accept: " + e.getMessage() + " Update inventory first."); }
+            notifService.notifyHospitalAccepted(r.getHospital(), r.getBloodGroup().getLabel(), bankName);
         } else {
-            if (rejectionReason != null && !rejectionReason.isBlank())
-                req.setRejectionReason(rejectionReason);
-            notificationService.notifyHospitalRequestRejected(
-                    req.getHospital(), req.getBloodGroup().getLabel(), bankName, rejectionReason);
+            if (reason != null && !reason.isBlank()) r.setRejectionReason(reason);
+            notifService.notifyHospitalRejected(r.getHospital(), r.getBloodGroup().getLabel(), bankName, reason);
         }
-
-        return requestRepo.save(req);
+        return reqRepo.save(r);
     }
 
-    // ── ASSIGN RIDER ──────────────────────────────────────────────────────────
     @Transactional
-    public BloodRequest assignRider(Long requestId, Long riderId) {
-        BloodRequest req = requestRepo.findById(requestId)
-                .orElseThrow(() -> new RuntimeException("Request not found"));
+    public BloodRequest assignRider(Long id, Long riderId) {
+        // BUG FIX: use pessimistic lock here to prevent double-assignment race condition
+        BloodRequest r = reqRepo.findByIdForUpdate(id).orElseThrow(() -> new RuntimeException("Request not found."));
+        if (r.getStatus() != RequestStatus.ACCEPTED)
+            throw new RuntimeException("Can only assign rider to ACCEPTED requests. Current: " + r.getStatus());
+        User rider = userRepo.findById(riderId).orElseThrow(() -> new RuntimeException("Rider not found."));
+        if (rider.getRole() != Role.RIDER) throw new RuntimeException("Selected user is not a rider.");
+        if (reqRepo.countActiveTasksByRider(rider, List.of(RequestStatus.ASSIGNED, RequestStatus.IN_TRANSIT)) > 0)
+            throw new RuntimeException("Rider " + rider.getName() + " already has an active delivery. Choose another rider.");
 
-        if (req.getStatus() != RequestStatus.ACCEPTED)
-            throw new RuntimeException(
-                    "Can only assign a rider to ACCEPTED requests. Current status: " + req.getStatus());
+        // BUG FIX: check rider is actually active/available before assigning
+        if (!rider.isActive())
+            throw new RuntimeException("Rider " + rider.getName() + " account is deactivated.");
 
-        User rider = userRepo.findById(riderId)
-                .orElseThrow(() -> new RuntimeException("Rider not found"));
-
-        if (rider.getRole() != Role.RIDER)
-            throw new RuntimeException("Selected user is not a rider");
-
-        // ── PREVENT DOUBLE ASSIGNMENT ─────────────────────────────────────────
-        long activeTasks = requestRepo.countActiveTasksByRider(rider);
-        if (activeTasks > 0)
-            throw new RuntimeException("Rider " + rider.getName() + " already has " + activeTasks +
-                    " active delivery in progress. Please assign a different rider to avoid overloading.");
-
-        // Generate 4-digit delivery OTP with 24-hour expiry
         String otp = String.format("%04d", rng.nextInt(10000));
-        req.setDeliveryOtp(otp);
-        req.setOtpExpiry(java.time.LocalDateTime.now().plusHours(24));
-
-        req.setRider(rider);
-        req.setStatus(RequestStatus.ASSIGNED);
-        BloodRequest saved = requestRepo.save(req);
-
-        notificationService.notifyRiderNewTask(rider,
-                req.getBloodGroup().getLabel(), req.getHospitalName(), req.getId());
-        notificationService.notifyHospitalRiderAssigned(
-                req.getHospital(), rider.getName(), req.getBloodGroup().getLabel(), req.getId());
-
+        r.setDeliveryOtp(otp);
+        r.setOtpExpiry(LocalDateTime.now().plusHours(24));
+        r.setRider(rider);
+        r.setStatus(RequestStatus.ASSIGNED);
+        BloodRequest saved = reqRepo.save(r);
+        notifService.notifyRiderNewTask(rider, r.getBloodGroup().getLabel(), r.getHospitalName(), id);
+        notifService.notifyHospitalRiderAssigned(r.getHospital(), rider.getName(), r.getBloodGroup().getLabel(), id);
         return saved;
     }
 
     // ── RIDER ─────────────────────────────────────────────────────────────────
-    public List<BloodRequest> getRiderTasks(String phone) {
-        // Active tasks only
-        return requestRepo.findByRider_PhoneAndStatusIn(phone,
-                List.of(RequestStatus.ASSIGNED, RequestStatus.IN_TRANSIT));
+
+    public List<BloodRequest> getRiderActive(String phone) {
+        return reqRepo.findByRider_PhoneAndStatusInOrderByCreatedAtDesc(phone,
+            List.of(RequestStatus.ASSIGNED, RequestStatus.IN_TRANSIT));
     }
 
     public List<BloodRequest> getRiderHistory(String phone) {
-        return requestRepo.findByRider_PhoneAndStatusIn(phone,
-                List.of(RequestStatus.DELIVERED, RequestStatus.CANCELLED));
+        return reqRepo.findByRider_PhoneAndStatusInOrderByCreatedAtDesc(phone,
+            List.of(RequestStatus.DELIVERED, RequestStatus.CANCELLED));
     }
 
     @Transactional
-    public BloodRequest updateRiderStatus(Long id, String status, String riderPhone, String otpProvided) {
-        BloodRequest req = requestRepo.findById(id)
-                .orElseThrow(() -> new RuntimeException("Request not found"));
-
-        if (req.getRider() == null || !req.getRider().getPhone().equals(riderPhone))
-            throw new RuntimeException("You are not authorised to update this delivery.");
+    public BloodRequest updateRiderStatus(Long id, String status, String riderPhone, String otp) {
+        // BUG FIX: use pessimistic lock to prevent concurrent status updates on same delivery
+        BloodRequest r = reqRepo.findByIdForUpdate(id).orElseThrow(() -> new RuntimeException("Request not found."));
+        if (r.getRider() == null || !r.getRider().getPhone().equals(riderPhone))
+            throw new RuntimeException("Not authorised.");
 
         RequestStatus newStatus;
-        try {
-            newStatus = RequestStatus.valueOf(status.toUpperCase());
-        } catch (IllegalArgumentException e) {
-            throw new RuntimeException("Invalid status: " + status);
-        }
+        try { newStatus = RequestStatus.valueOf(status.toUpperCase()); }
+        catch (Exception e) { throw new RuntimeException("Invalid status: " + status); }
 
-        RequestStatus expected = RIDER_TRANSITIONS.get(req.getStatus());
-        if (expected == null)
-            throw new RuntimeException("Delivery is already " + req.getStatus() + ". No further updates possible.");
+        RequestStatus expected = RIDER_FLOW.get(r.getStatus());
+        if (expected == null) throw new RuntimeException("Delivery is already " + r.getStatus() + ".");
         if (newStatus != expected)
-            throw new RuntimeException(
-                    "Cannot skip steps. From " + req.getStatus() + " you must advance to " + expected + ".");
+            throw new RuntimeException("Cannot skip steps. From " + r.getStatus() + " must advance to " + expected + ".");
 
-        // OTP verification when marking DELIVERED
         if (newStatus == RequestStatus.DELIVERED) {
-            if (req.getDeliveryOtp() != null && !req.getDeliveryOtp().isBlank()) {
-                if (otpProvided == null || otpProvided.isBlank())
-                    throw new RuntimeException(
-                            "Delivery OTP is required to confirm delivery. Ask the hospital for the OTP.");
-                if (req.getOtpExpiry() != null && java.time.LocalDateTime.now().isAfter(req.getOtpExpiry()))
-                    throw new RuntimeException(
-                            "Delivery OTP has expired. Please contact the blood bank to re-assign.");
-                if (!req.getDeliveryOtp().equals(otpProvided.trim()))
-                    throw new RuntimeException(
-                            "Incorrect OTP. Please ask the hospital to verify and provide the correct 4-digit code.");
+            if (r.getDeliveryOtp() != null) {
+                if (otp == null || otp.isBlank()) throw new RuntimeException("Delivery OTP required. Ask hospital for the 4-digit code.");
+                if (r.getOtpExpiry() != null && LocalDateTime.now().isAfter(r.getOtpExpiry()))
+                    throw new RuntimeException("OTP expired. Contact blood bank to reassign.");
+                if (!r.getDeliveryOtp().equals(otp.trim())) throw new RuntimeException("Incorrect OTP.");
             }
+            notifService.notifyHospitalDelivered(r.getHospital(), r.getBloodGroup().getLabel(), id);
+        }
+        if (newStatus == RequestStatus.IN_TRANSIT) {
+            notifService.notifyHospitalPickedUp(r.getHospital(), r.getBloodGroup().getLabel(), id);
         }
 
-        req.setStatus(newStatus);
-        if (newStatus == RequestStatus.DELIVERED) {
-            notificationService.notifyHospitalDelivered(
-                    req.getHospital(), req.getBloodGroup().getLabel(), req.getId());
-        }
-        return requestRepo.save(req);
+        r.setStatus(newStatus);
+        return reqRepo.save(r);
     }
 }

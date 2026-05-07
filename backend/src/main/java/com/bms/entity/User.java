@@ -11,14 +11,12 @@ import org.hibernate.annotations.UpdateTimestamp;
 
 import java.time.LocalDateTime;
 
-@Getter
-@Setter
+@Getter @Setter
 @Entity
 @Table(name = "users")
 public class User {
 
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
     @NotBlank(message = "Name is required")
@@ -39,29 +37,33 @@ public class User {
     @NotNull(message = "Role is required")
     private Role role;
 
+    // For HOSPITAL and BLOOD_BANK — official registered name
+    private String entityName;
+
     private String address;
     private Double latitude;
     private Double longitude;
 
-    // FIX: renamed from hospitalName → entityName for consistency
-    @JsonProperty("entityName")
-    private String entityName;
+    // Vehicle info for riders
+    private String vehicleType;
+    private String vehiclePlate;
+    private String assignedZone;
 
-    // FCM token for Firebase push notifications
+    // FCM push notification token
+    @JsonIgnore
     private String fcmToken;
 
-    // Soft delete — never hard-delete users
+    // Availability for riders
+    @Column(nullable = false)
+    private boolean available = true;
+
+    // Soft delete
     @Column(nullable = false)
     private boolean active = true;
 
-    @CreationTimestamp
-    @Column(updatable = false)
+    @CreationTimestamp @Column(updatable = false)
     private LocalDateTime createdAt;
 
     @UpdateTimestamp
     private LocalDateTime updatedAt;
-
-    // Legacy accessor — keeps backward compat with service code still using getHospitalName()
-    public String getHospitalName() { return entityName; }
-    public void setHospitalName(String name) { this.entityName = name; }
 }

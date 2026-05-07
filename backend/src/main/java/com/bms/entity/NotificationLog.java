@@ -6,18 +6,16 @@ import lombok.Getter;
 import lombok.Setter;
 import org.hibernate.annotations.CreationTimestamp;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
 
 @Getter @Setter
 @Entity
 @Table(name = "notification_logs")
 public class NotificationLog {
-
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    // The user who should see this notification
     @ManyToOne
     @JsonIgnoreProperties({"password","fcmToken","active","createdAt","updatedAt","latitude","longitude","address"})
     private User recipient;
@@ -27,14 +25,12 @@ public class NotificationLog {
     @Column(columnDefinition = "TEXT")
     private String message;
 
-    // Optional link: "REQUEST:42" or "CAMP:7" — frontend uses to navigate
-    private String refType;
+    private String refType;  // REQUEST, CAMP, SYSTEM
     private Long   refId;
 
     @Column(nullable = false)
     private boolean read = false;
 
-    @CreationTimestamp
-    @Column(updatable = false)
+    @CreationTimestamp @Column(updatable = false)
     private LocalDateTime createdAt;
 }

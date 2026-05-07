@@ -14,41 +14,38 @@ import java.util.List;
 @RequestMapping("/api/camps")
 public class BloodCampController {
 
-    private final BloodCampService campService;
-
-    public BloodCampController(BloodCampService campService) {
-        this.campService = campService;
-    }
+    private final BloodCampService service;
+    public BloodCampController(BloodCampService s) { service = s; }
 
     @PreAuthorize("hasRole('BLOOD_BANK')")
     @PostMapping
     public ResponseEntity<BloodCamp> create(@Valid @RequestBody BloodCamp camp, Authentication auth) {
-        return ResponseEntity.ok(campService.createCamp(camp, auth.getName()));
+        return ResponseEntity.ok(service.create(camp, auth.getName()));
     }
 
     @PreAuthorize("hasRole('BLOOD_BANK')")
     @GetMapping("/my")
-    public ResponseEntity<List<BloodCamp>> getMyCamps(Authentication auth) {
-        return ResponseEntity.ok(campService.getMyCamps(auth.getName()));
+    public ResponseEntity<List<BloodCamp>> getMine(Authentication auth) {
+        return ResponseEntity.ok(service.getMine(auth.getName()));
     }
 
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN','BLOOD_BANK')")
     @GetMapping
     public ResponseEntity<List<BloodCamp>> getAll() {
-        return ResponseEntity.ok(campService.getAll());
+        return ResponseEntity.ok(service.getAll());
     }
 
-    @PreAuthorize("hasRole('BLOOD_BANK')")
+    @PreAuthorize("hasAnyRole('BLOOD_BANK','ADMIN')")
     @PutMapping("/{id}")
     public ResponseEntity<BloodCamp> update(@PathVariable Long id,
-            @Valid @RequestBody BloodCamp camp, Authentication auth) {
-        return ResponseEntity.ok(campService.updateCamp(id, camp, auth.getName()));
+            @RequestBody BloodCamp camp, Authentication auth) {
+        return ResponseEntity.ok(service.update(id, camp, auth.getName()));
     }
 
-    @PreAuthorize("hasAnyRole('BLOOD_BANK', 'ADMIN')")
+    @PreAuthorize("hasAnyRole('BLOOD_BANK','ADMIN')")
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> delete(@PathVariable Long id, Authentication auth) {
-        campService.deleteCamp(id, auth.getName());
+        service.delete(id, auth.getName());
         return ResponseEntity.noContent().build();
     }
 }

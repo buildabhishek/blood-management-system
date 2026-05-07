@@ -1,8 +1,7 @@
 package com.bms.controller;
 
 import com.bms.dto.*;
-import com.bms.entity.RefreshToken;
-import com.bms.entity.User;
+import com.bms.entity.*;
 import com.bms.security.JwtUtil;
 import com.bms.service.*;
 import jakarta.validation.Valid;
@@ -19,20 +18,15 @@ import java.util.Map;
 @RequestMapping("/api/auth")
 public class AuthController {
 
-    private final UserService userService;
+    private final UserService           userService;
     private final AuthenticationManager authManager;
-    private final JwtUtil jwtUtil;
-    private final RefreshTokenService refreshTokenService;
-    private final LoginAttemptService loginAttemptService;
+    private final JwtUtil               jwtUtil;
+    private final RefreshTokenService   refreshService;
+    private final LoginAttemptService   attemptService;
 
-    public AuthController(UserService userService, AuthenticationManager authManager,
-            JwtUtil jwtUtil, RefreshTokenService refreshTokenService,
-            LoginAttemptService loginAttemptService) {
-        this.userService = userService;
-        this.authManager = authManager;
-        this.jwtUtil = jwtUtil;
-        this.refreshTokenService = refreshTokenService;
-        this.loginAttemptService = loginAttemptService;
+    public AuthController(UserService u, AuthenticationManager a, JwtUtil j,
+                          RefreshTokenService r, LoginAttemptService l) {
+        userService = u; authManager = a; jwtUtil = j; refreshService = r; attemptService = l;
     }
 
     @PostMapping("/register")
@@ -44,72 +38,57 @@ public class AuthController {
     @PostMapping("/login")
     public ResponseEntity<?> login(@Valid @RequestBody LoginRequest req) {
         String phone = req.getPhone();
-
-        // Rate limiting / lockout check
-        if (loginAttemptService.isLocked(phone)) {
-            return ResponseEntity.status(429).body(
-                Map.of("error", "Account temporarily locked due to too many failed attempts. Try again later."));
-        }
-
+        if (attemptService.isLocked(phone))
+            return ResponseEntity.status(429).body(Map.of("error",
+                "Account locked due to too many failed attempts. Try again in 15 minutes."));
         try {
             Authentication auth = authManager.authenticate(
                 new UsernamePasswordAuthenticationToken(phone, req.getPassword()));
-
-            User dbUser = userService.findByPhone(phone);
-            if (!dbUser.isActive()) {
-                return ResponseEntity.status(401).body(Map.of("error", "Account is deactivated"));
-            }
-
-            // Save FCM token if provided
-            if (req.getFcmToken() != null && !req.getFcmToken().isBlank()) {
+            User user = userService.findByPhone(phone);
+            if (!user.isActive())
+                return ResponseEntity.status(401).body(Map.of("error", "Account is deactivated."));
+            if (req.getFcmToken() != null && !req.getFcmToken().isBlank())
                 userService.updateFcmToken(phone, req.getFcmToken());
-            }
 
-            UserDetails userDetails = (UserDetails) auth.getPrincipal();
-            String accessToken  = jwtUtil.generateAccessToken(userDetails, dbUser.getRole());
-            RefreshToken refresh = refreshTokenService.create(dbUser);
-
-            loginAttemptService.recordSuccess(phone);
+            UserDetails ud = (UserDetails) auth.getPrincipal();
+            String accessToken = jwtUtil.generateAccessToken(ud, user.getRole());
+            RefreshToken rt    = refreshService.create(user);
+            attemptService.recordSuccess(phone);
 
             Map<String, Object> resp = new HashMap<>();
             resp.put("token",        accessToken);
-            resp.put("refreshToken", refresh.getToken());
-            resp.put("role",         dbUser.getRole().name());
-            resp.put("name",         dbUser.getName());
-            if (dbUser.getEntityName() != null) resp.put("entityName", dbUser.getEntityName());
-
+            resp.put("refreshToken", rt.getToken());
+            resp.put("role",         user.getRole().name());
+            resp.put("name",         user.getName());
+            resp.put("phone",        user.getPhone());
+            if (user.getEntityName()  != null) resp.put("entityName",  user.getEntityName());
+            if (user.getAssignedZone()!= null) resp.put("assignedZone", user.getAssignedZone());
+            resp.put("available", user.isAvailable());
             return ResponseEntity.ok(resp);
 
         } catch (BadCredentialsException e) {
-            loginAttemptService.recordFailure(phone);
-            return ResponseEntity.status(401).body(Map.of("error", "Invalid phone or password"));
+            attemptService.recordFailure(phone);
+            return ResponseEntity.status(401).body(Map.of("error", "Invalid phone or password."));
         } catch (Exception e) {
-            return ResponseEntity.status(500).body(Map.of("error", "Authentication failed"));
+            return ResponseEntity.status(500).body(Map.of("error", "Authentication failed."));
         }
     }
 
     @PostMapping("/refresh")
     public ResponseEntity<?> refresh(@Valid @RequestBody RefreshTokenRequest req) {
         try {
-            RefreshToken rt = refreshTokenService.findByToken(req.getRefreshToken());
+            RefreshToken rt = refreshService.findByToken(req.getRefreshToken());
             if (rt.isExpired()) {
-                refreshTokenService.revoke(req.getRefreshToken());
-                return ResponseEntity.status(401).body(Map.of("error", "Refresh token expired. Please log in again."));
+                refreshService.revoke(req.getRefreshToken());
+                return ResponseEntity.status(401).body(Map.of("error", "Session expired. Please log in again."));
             }
             User user = rt.getUser();
-            UserDetails userDetails = org.springframework.security.core.userdetails.User
-                .withUsername(user.getPhone())
-                .password(user.getPassword())
-                .authorities("ROLE_" + user.getRole().name())
-                .build();
-
-            String newAccess  = jwtUtil.generateAccessToken(userDetails, user.getRole());
-            RefreshToken newRt = refreshTokenService.create(user); // rotate
-
-            return ResponseEntity.ok(Map.of(
-                "token",        newAccess,
-                "refreshToken", newRt.getToken()
-            ));
+            UserDetails ud = org.springframework.security.core.userdetails.User
+                .withUsername(user.getPhone()).password(user.getPassword())
+                .authorities("ROLE_" + user.getRole().name()).build();
+            String newToken = jwtUtil.generateAccessToken(ud, user.getRole());
+            RefreshToken newRt = refreshService.create(user);
+            return ResponseEntity.ok(Map.of("token", newToken, "refreshToken", newRt.getToken()));
         } catch (RuntimeException e) {
             return ResponseEntity.status(401).body(Map.of("error", e.getMessage()));
         }
@@ -117,16 +96,13 @@ public class AuthController {
 
     @PostMapping("/logout")
     public ResponseEntity<?> logout(@RequestBody(required = false) RefreshTokenRequest req) {
-        if (req != null && req.getRefreshToken() != null) {
-            refreshTokenService.revoke(req.getRefreshToken());
-        }
-        return ResponseEntity.ok(Map.of("message", "Logged out"));
+        if (req != null && req.getRefreshToken() != null) refreshService.revoke(req.getRefreshToken());
+        return ResponseEntity.ok(Map.of("message", "Logged out."));
     }
 
     @PutMapping("/fcm-token")
-    public ResponseEntity<?> updateFcmToken(@RequestBody Map<String, String> body,
-            org.springframework.security.core.Authentication auth) {
+    public ResponseEntity<?> updateFcm(@RequestBody Map<String, String> body, Authentication auth) {
         userService.updateFcmToken(auth.getName(), body.get("fcmToken"));
-        return ResponseEntity.ok(Map.of("message", "FCM token updated"));
+        return ResponseEntity.ok(Map.of("message", "FCM token updated."));
     }
 }
